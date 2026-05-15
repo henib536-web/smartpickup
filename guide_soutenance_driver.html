@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soutenance Technique - Partie Driver</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f8fafc;
+            --accent-color: #facc15; /* Jaune Taxi */
+            --accent-hover: #eab308;
+            --muted-text: #94a3b8;
+            --border-color: #334155;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 20px;
+        }
+        h1 {
+            color: var(--accent-color);
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        h2 {
+            color: var(--accent-color);
+            font-size: 1.8rem;
+            margin-top: 40px;
+            border-left: 4px solid var(--accent-color);
+            padding-left: 10px;
+        }
+        h3 {
+            color: var(--text-color);
+            font-size: 1.4rem;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            border-color: var(--accent-color);
+        }
+        .method {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.85rem;
+            margin-right: 10px;
+            text-transform: uppercase;
+        }
+        .get { background-color: #1e3a8a; color: #60a5fa; }
+        .post { background-color: #065f46; color: #34d399; }
+        .put { background-color: #78350f; color: #fbbf24; }
+        .delete { background-color: #7f1d1d; color: #f87171; }
+        
+        .endpoint {
+            font-family: monospace;
+            background-color: #0f172a;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: #e2e8f0;
+        }
+        .field {
+            margin-top: 15px;
+        }
+        .field-title {
+            font-weight: bold;
+            color: var(--muted-text);
+            font-size: 0.9rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+        th {
+            background-color: #0f172a;
+            color: var(--accent-color);
+        }
+        tr:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+        .badge {
+            background-color: var(--accent-color);
+            color: #000;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        
+        /* Styles pour le Flux de Données */
+        .flow-container {
+            margin-top: 30px;
+            position: relative;
+        }
+        .flow-step {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            position: relative;
+        }
+        .flow-step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 20px;
+            top: 40px;
+            bottom: -20px;
+            width: 2px;
+            background-color: var(--border-color);
+        }
+        .flow-number {
+            background-color: var(--accent-color);
+            color: #000;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 20px;
+            flex-shrink: 0;
+            z-index: 1;
+        }
+        .flow-content {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            border-radius: 10px;
+            flex-grow: 1;
+        }
+        .flow-file {
+            font-family: monospace;
+            color: var(--accent-color);
+            font-size: 0.9rem;
+            display: block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Guide de Soutenance Technique</h1>
+            <p style="color: var(--muted-text); font-size: 1.2rem;">Focus sur la partie <strong>Driver</strong> (Chauffeur) - SmartPickup</p>
+        </header>
+
+        <section>
+            <h2>1. Architecture et Flux Global</h2>
+            <p>
+                La partie Driver gère l'état du chauffeur, sa localisation, et le cycle de vie des courses. 
+                Le backend est développé avec <strong>FastAPI</strong> et le frontend mobile avec <strong>Flutter</strong>.
+                La communication se fait via des requêtes HTTP REST et des WebSockets pour le temps réel (notamment pour le suivi de la position).
+            </p>
+        </section>
+
+        <section>
+            <h2>2. Toutes les Fonctions du Driver (Backend)</h2>
+            <p>Ces fonctions sont définies dans <code>driver_controller.py</code> et gèrent toute la logique métier du chauffeur.</p>
+            
+            <div class="grid">
+                <!-- Profile -->
+                <div class="card">
+                    <h3><span class="method get">GET</span> <code>get_profile</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/profile/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Récupère les informations du profil du chauffeur (nom, évaluation, etc.).</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method put">PUT</span> <code>update_profile</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/profile/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Met à jour les informations du profil.</div>
+                    </div>
+                </div>
+
+                <!-- Status & Location -->
+                <div class="card">
+                    <h3><span class="method put">PUT</span> <code>update_driver_status</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/status/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Bascule le statut du chauffeur entre En ligne (disponible) et Hors ligne.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method put">PUT</span> <code>update_driver_location</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/location/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Met à jour les coordonnées GPS du chauffeur en base de données.</div>
+                    </div>
+                </div>
+
+                <!-- Rides -->
+                <div class="card">
+                    <h3><span class="method get">GET</span> <code>get_available_rides</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/rides/available</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Liste les courses en attente. Utilise en interne la recherche de proximité.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method post">POST</span> <code>accept_ride</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/rides/{request_id}/accept</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Le chauffeur accepte une demande de course spécifique.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method get">GET</span> <code>get_accepted_rides</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/rides/accepted/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Récupère la liste des courses acceptées par le chauffeur.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method get">GET</span> <code>get_active_ride</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/rides/active/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Récupère la course actuellement en cours pour ce chauffeur.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method get">GET</span> <code>get_driver_history</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/rides/history/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Récupère l'historique des courses terminées par le chauffeur.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method put">PUT</span> <code>update_ride_status</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/rides/{request_id}/status</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Fait avancer le statut de la course (ex: 'arrived', 'started', 'completed').</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="method get">GET</span> <code>get_taxi_info</code></h3>
+                    <div class="field">
+                        <div class="field-title">Route:</div>
+                        <div class="endpoint">/taxi/{user_id}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Récupère les informations sur le véhicule du chauffeur.</div>
+                    </div>
+                </div>
+
+                <!-- Fonctions Internes -->
+                <div class="card">
+                    <h3><span class="badge">Interne</span> <code>_calculate_distance</code></h3>
+                    <div class="field">
+                        <div class="field-title">Type:</div>
+                        <div>Fonction d'aide (Helper)</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Calcule la distance entre deux points GPS (formule de Haversine).</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="badge">Interne</span> <code>_get_top_10_closest_drivers</code></h3>
+                    <div class="field">
+                        <div class="field-title">Type:</div>
+                        <div>Algorithme de recherche</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Recherche et trie les 10 chauffeurs les plus proches d'une position donnée.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="badge">Interne</span> <code>_notify_ride_acceptance</code></h3>
+                    <div class="field">
+                        <div class="field-title">Type:</div>
+                        <div>Notification</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Description:</div>
+                        <div>Envoie une notification (via FCM ou WebSocket) pour confirmer l'acceptation de la course.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>3. Consommation dans le Frontend (Flutter)</h2>
+            <p>
+                Dans l'application Flutter, ces méthodes sont appelées via le service <code>DriverApiService</code> (dans <code>lib/services/driver_api_service.dart</code>).
+            </p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Méthode Flutter</th>
+                        <th>Appelée par / Déclencheur UI</th>
+                        <th>Impact Visuel / Résolution</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>getProfile()</code></td>
+                        <td>Écran de Profil</td>
+                        <td>Affiche les informations personnelles et professionnelles du chauffeur.</td>
+                    </tr>
+                    <tr>
+                        <td><code>updateStatus(bool isOnline)</code></td>
+                        <td>Switch "En Ligne" sur la Home</td>
+                        <td>Active ou désactive la réception des courses. Change l'état visuel du chauffeur sur la carte globale.</td>
+                    </tr>
+                    <tr>
+                        <td><code>updateLocation(lat, lng)</code></td>
+                        <td>Service GPS (Geolocator)</td>
+                        <td>Envoie la position toutes les X secondes. Permet le suivi en temps réel par le client.</td>
+                    </tr>
+                    <tr>
+                        <td><code>getAvailableRides()</code></td>
+                        <td>Liste des courses disponibles</td>
+                        <td>Affiche les cartes des clients qui attendent un taxi.</td>
+                    </tr>
+                    <tr>
+                        <td><code>acceptRide(requestId)</code></td>
+                        <td>Bouton "Accepter"</td>
+                        <td>Bascule l'application sur l'écran de navigation vers le client.</td>
+                    </tr>
+                    <tr>
+                        <td><code>updateRideStatus(requestId, action)</code></td>
+                        <td>Boutons d'action (Arrivé, etc.)</td>
+                        <td>"Arrived" -> Notifie le client.<br>"Started" -> Lance le compteur/trajet.<br>"Completed" -> Termine et facture.</td>
+                    </tr>
+                    <tr>
+                        <td><code>getActiveRide()</code></td>
+                        <td>Initialisation / Restauration</td>
+                        <td>Si l'application crash ou est fermée, cela permet de revenir directement à l'écran de la course en cours.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>4. Intégration de Mapbox (Cartographie)</h2>
+            <p>
+                L'application utilise l'API <strong>Mapbox</strong> pour toute la partie cartographie et navigation. Voici comment elle est consommée :
+            </p>
+            
+            <div class="grid">
+                <div class="card">
+                    <h3>Mapbox Maps SDK</h3>
+                    <div class="field">
+                        <div class="field-title">Utilisation:</div>
+                        <div>Affichage de la carte interactive.</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Consommation:</div>
+                        <div>Intégré via le widget Flutter de Mapbox. Il permet d'afficher la position du chauffeur, du client et de zoomer/dézoomer.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Mapbox Directions API</h3>
+                    <div class="field">
+                        <div class="field-title">Utilisation:</div>
+                        <div>Calcul d'itinéraire.</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Consommation:</div>
+                        <div>Appelé pour tracer la ligne bleue (Polyline) entre le chauffeur et le client, puis entre le client et la destination.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Annotations & Marqueurs</h3>
+                    <div class="field">
+                        <div class="field-title">Utilisation:</div>
+                        <div>Icônes personnalisées.</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-title">Consommation:</div>
+                        <div>Utilisé pour afficher l'icône du taxi (qui tourne selon l'orientation) et le marqueur de destination sur la carte.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>5. Résolutions et Logiques Clés (Questions du Jury)</h2>
+            
+            <div class="card" style="margin-top: 20px;">
+                <h3>Q: Comment fonctionne la mise à jour de la localisation ?</h3>
+                <p>
+                    <strong>R:</strong> Le front utilise un plugin GPS (comme <code>Geolocator</code>) qui écoute les flux de position. Dès qu'un changement significatif est détecté, la méthode <code>updateLocation</code> est appelée pour synchroniser le backend.
+                </p>
+            </div>
+
+            <div class="card" style="margin-top: 20px;">
+                <h3>Q: Comment gérez-vous la concurrence si deux chauffeurs acceptent la même course ?</h3>
+                <p>
+                    <strong>R:</strong> Le backend (FastAPI) vérifie l'état de la course en base de données avant de valider l'acceptation. Si la course n'est plus "en attente" (pending), il renvoie une erreur au deuxième chauffeur, assurant que seul le premier a la course.
+                </p>
+            </div>
+
+            <div class="card" style="margin-top: 20px;">
+                <h3>Q: Comment sécurisez-vous ces échanges ?</h3>
+                <p>
+                    <strong>R:</strong> Tous les appels passent par des en-têtes HTTP incluant un <code>Authorization: Bearer [JWT_TOKEN]</code>. Le backend valide ce token pour identifier le chauffeur et vérifier ses droits.
+                </p>
+            </div>
+
+            <div class="card" style="margin-top: 20px;">
+                <h3>Q: Pourquoi avoir choisi Mapbox plutôt que Google Maps ?</h3>
+                <p>
+                    <strong>R:</strong> Mapbox offre une plus grande flexibilité pour la personnalisation des cartes (styles), une gestion performante des marqueurs personnalisés (comme l'icône du taxi qui tourne), et des API de directions très précises pour le calcul d'itinéraires.
+                </p>
+            </div>
+        </section>
+
+        <section id="data-flow">
+            <h2>6. Voyage d'une Donnée : Du Clic au Serveur</h2>
+            <p>
+                Voici le chemin précis parcouru par l'information lorsqu'un chauffeur clique sur un bouton (Exemple : <strong>"Accepter la course"</strong>).
+            </p>
+
+            <div class="flow-container">
+                <div class="flow-step">
+                    <div class="flow-number">1</div>
+                    <div class="flow-content">
+                        <span class="flow-file">frontend/lib/screens/driver_home.dart</span>
+                        <strong>Interaction UI :</strong> L'utilisateur clique sur le bouton. L'UI capture l'événement et récupère l'ID de la course.
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="flow-number">2</div>
+                    <div class="flow-content">
+                        <span class="flow-file">frontend/lib/services/driver_api_service.dart</span>
+                        <strong>Appel Service :</strong> La méthode <code>acceptRide(id)</code> est appelée. Elle construit la requête HTTP (URL, Headers avec Token JWT, Body).
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="flow-number">3</div>
+                    <div class="flow-content">
+                        <span class="flow-file">backend/app/routes/driver_routes.py</span>
+                        <strong>Point d'Entrée (Route) :</strong> Le serveur FastAPI reçoit la requête. La route <code>@router.post("/{request_id}/accept")</code> identifie l'action à effectuer.
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="flow-number">4</div>
+                    <div class="flow-content">
+                        <span class="flow-file">backend/app/controllers/driver_controller.py</span>
+                        <strong>Logique Métier :</strong> La fonction <code>accept_ride()</code> est exécutée. Elle vérifie si la course est toujours libre et si le chauffeur est éligible.
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="flow-number">5</div>
+                    <div class="flow-content">
+                        <span class="flow-file">backend/app/database.py & models/</span>
+                        <strong>Persistance :</strong> Le contrôleur communique avec la base de données PostgreSQL pour mettre à jour l'état de la course (Passage de 'pending' à 'accepted').
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="flow-number">6</div>
+                    <div class="flow-content">
+                        <span class="flow-file">Communication de Retour</span>
+                        <strong>Réponse & UI Update :</strong> Le backend renvoie un code 200 (Success). Le frontend reçoit le JSON, met à jour l'état local, et navigue automatiquement vers l'écran de guidage.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <p style="text-align: center; color: var(--muted-text); margin-top: 40px;">
+                Document généré pour la soutenance technique - SmartPickup
+            </p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+# Root .gitignore for SmartPickup
+
+# Secrets (CRITICAL: Never publish these)
+backend/app/firebase-adminsdk.json
+backend/.env
+frontend/lib/config.dart
+.env
+*.json.secret
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+build/
+dist/
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Flutter.podspec
+ios/Flutter/App.framework
+ios/Flutter/App.podspec
+ios/Flutter/App.framework.zip
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+*.iws
+*.swp

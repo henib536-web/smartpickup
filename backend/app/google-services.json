@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "23843003727",
+    "project_id": "smartpickup-dcf12",
+    "storage_bucket": "smartpickup-dcf12.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:23843003727:android:797dbc02ce9a18210cb93a",
+        "android_client_info": {
+          "package_name": "com.digmaco.Smartpickup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDi3ruGvd-nm3ulUJnlMp37pzbsCk1NwrI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
