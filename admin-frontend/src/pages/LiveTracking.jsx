@@ -277,7 +277,6 @@ export default function LiveTracking() {
             </div>
           </div>
         </div>
-        <p>test</p>
 
         {/* Map */}
         <div className="glass-panel" style={{ flex: 1, borderRadius: '20px', overflow: 'hidden', position: 'relative' }}>
