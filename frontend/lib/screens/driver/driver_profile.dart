@@ -396,26 +396,7 @@ class _DriverProfileState extends State<DriverProfile> {
 
                       const SizedBox(height: 15),
 
-                      /// PERFORMANCE
-                      _buildSectionContainer(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildSectionHeader(Icons.speed, "Performance Metrics"),
-                            const SizedBox(height: 15),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                _perfMetric("Reliability", "98%", Colors.green),
-                                _perfMetric("Acceptance", "85%", Color(0xFFFFCC00)),
-                                _perfMetric("Rejection", "5%", Colors.red),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
 
-                      const SizedBox(height: 15),
 
                       /// STATUS & SECURITY
                       _buildSectionContainer(
@@ -432,6 +413,16 @@ class _DriverProfileState extends State<DriverProfile> {
                               title: const Text("Logout", style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
                               onTap: () async {
                                 final prefs = await SharedPreferences.getInstance();
+                                final userId = prefs.getInt('user_id');
+                                // Effacer le token FCM du backend pour éviter les notifs croisées
+                                if (userId != null) {
+                                  try {
+                                    await http.delete(
+                                      Uri.parse('${Env.baseUrl}/users/fcm-token/$userId'),
+                                      headers: Env.defaultHeaders,
+                                    );
+                                  } catch (_) {}
+                                }
                                 await prefs.clear();
                                 if (mounted) Navigator.pushReplacementNamed(context, '/');
                               },
@@ -500,14 +491,6 @@ class _DriverProfileState extends State<DriverProfile> {
     );
   }
 
-  Widget _perfMetric(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
-      ],
-    );
-  }
 
   Widget _settingItem(String title, String subtitle, bool value, Function(bool) onChanged) {
     return Row(

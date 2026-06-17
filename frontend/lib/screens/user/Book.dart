@@ -33,7 +33,14 @@ class _BookRideState extends State<BookRide> {
   String pickupAddress = "Map Selection";
   String dropoffAddress = "Map Selection";
   String currentZoneName = "Tunisie";
-  double priorityPrice = 2.0; // Prix de départ par défaut
+
+  // --- Tarification ---
+  static const int basePriceDefault = 3500; // millimes
+  static const int pricePerKm = 500;        // millimes par km
+  static const int fixedFee = 900;           // frais fixes millimes
+  int clientBasePrice = basePriceDefault;    // le client peut augmenter
+  double? distanceKm;
+  int? estimatedPrice; // en millimes
 
   @override
   void initState() {
@@ -54,18 +61,31 @@ class _BookRideState extends State<BookRide> {
     });
   }
 
+  /// Calcule le prix en millimes selon la formule :
+  /// clientBasePrice + (distanceKm * 500) + 900
+  void _calculatePrice() {
+    if (distanceKm != null) {
+      setState(() {
+        estimatedPrice = (clientBasePrice + (distanceKm! * pricePerKm) + fixedFee).round();
+      });
+    }
+  }
+
   Future<void> getRoute() async {
     if (pickup == null || dropoff == null) return;
-        "https://api.mapbox.com/directions/v5/mapbox/driving/${pickup!.longitude},${pickup!.latitude};${dropoff!.longitude},${dropoff!.latitude}?overview=full&geometries=geojson&access_token=${Env.mapboxToken}";
+    final String url = "https://api.mapbox.com/directions/v5/mapbox/driving/${pickup!.longitude},${pickup!.latitude};${dropoff!.longitude},${dropoff!.latitude}?overview=full&geometries=geojson&access_token=${Env.mapboxToken}";
     try {
       var response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
         var data = jsonDecode(response.body);
         if (data["routes"] != null && data["routes"].isNotEmpty) {
           List coords = data["routes"][0]["geometry"]["coordinates"];
+          double distanceMeters = (data["routes"][0]["distance"] as num).toDouble();
           setState(() {
             route = coords.map((c) => LatLng(c[1], c[0])).toList();
+            distanceKm = distanceMeters / 1000.0;
           });
+          _calculatePrice();
         }
       }
     } catch (e) {
@@ -116,11 +136,19 @@ class _BookRideState extends State<BookRide> {
     if (pickup != null && dropoff != null) getRoute();
   }
 
+  bool _isSubmitting = false;
+
   Future<void> _handleBooking() async {
+    if (_isSubmitting) return;
+
     if (pickup == null || dropoff == null || _timeController.text.isEmpty || _passengerNameController.text.isEmpty) {
       _showSnackBar("Please fill all required fields", Colors.red);
       return;
     }
+
+    setState(() {
+      _isSubmitting = true;
+    });
 
     final prefs = await SharedPreferences.getInstance();
     final int userId = prefs.getInt('user_id') ?? 0;
@@ -152,6 +180,7 @@ class _BookRideState extends State<BookRide> {
     if (isRecurring) {
       if (_startDateController.text.isEmpty || _endDateController.text.isEmpty || selectedDays.isEmpty) {
         _showSnackBar("Please complete recurring details", Colors.red);
+        setState(() => _isSubmitting = false);
         return;
       }
       body["pickup_time"] = "${_startDateController.text}T$timePart";
@@ -160,8 +189,11 @@ class _BookRideState extends State<BookRide> {
       body["selected_days"] = selectedDays;
     } else {
       body["pickup_time"] = "${_dateController.text}T$timePart";
-      body["priority_price"] = priorityPrice; // Envoi du prix prioritaire
     }
+
+    body["priority_price"] = clientBasePrice / 1000.0; // Convertir millimes en DT
+    body["distance_km"] = distanceKm;
+    body["estimated_price"] = estimatedPrice;
 
     try {
       final response = await http.post(
@@ -179,9 +211,11 @@ class _BookRideState extends State<BookRide> {
       } else {
         debugPrint("Backend Error: ${response.body}");
         _showSnackBar("Error: Check console for details", Colors.red);
+        setState(() => _isSubmitting = false);
       }
     } catch (e) {
       _showSnackBar("Connection failed. Check your server.", Colors.red);
+      setState(() => _isSubmitting = false);
     }
   }
 
@@ -311,10 +345,8 @@ class _BookRideState extends State<BookRide> {
           ],
           const SizedBox(height: 15),
           _buildTimeField(),
-          if (!isRecurring) ...[
-            const SizedBox(height: 20),
-            _buildPriorityPriceSelector(),
-          ],
+          const SizedBox(height: 20),
+          _buildPriorityPriceSelector(),
           const SizedBox(height: 30),
           _buildSubmitButton(),
         ],
@@ -421,7 +453,41 @@ class _BookRideState extends State<BookRide> {
     );
   }
 
+  int _calculateOccurrences() {
+    if (!isRecurring || _startDateController.text.isEmpty || _endDateController.text.isEmpty || selectedDays.isEmpty) return 0;
+    try {
+      final start = DateTime.parse(_startDateController.text);
+      final end = DateTime.parse(_endDateController.text);
+      int count = 0;
+      for (var d = start; d.isBefore(end.add(const Duration(days: 1))); d = d.add(const Duration(days: 1))) {
+        String dayName = DateFormat('EEEE').format(d);
+        if (selectedDays.contains(dayName)) count++;
+      }
+      return count;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Widget _buildPriorityPriceSelector() {
+    final String priceDisplay = estimatedPrice != null
+        ? "${(estimatedPrice! / 1000).toStringAsFixed(3)} DT"
+        : "--";
+    final String distanceDisplay = distanceKm != null
+        ? "${distanceKm!.toStringAsFixed(1)} km"
+        : "Sélectionnez les points";
+    final String basePriceDisplay = "${(clientBasePrice / 1000).toStringAsFixed(3)} DT";
+
+    int occurrences = isRecurring ? _calculateOccurrences() : 1;
+    String totalPeriodDisplay = "";
+    if (isRecurring && estimatedPrice != null) {
+      if (occurrences > 0) {
+        totalPeriodDisplay = "${((estimatedPrice! * occurrences) / 1000).toStringAsFixed(3)} DT ($occurrences courses)";
+      } else {
+        totalPeriodDisplay = "Sélectionnez des jours valides";
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
@@ -429,29 +495,105 @@ class _BookRideState extends State<BookRide> {
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: const Color(0xFFFFCC00), width: 1.5),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Priority Price", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-              Text("${priorityPrice.toStringAsFixed(3)} DT", style: const TextStyle(color: Color(0xFFFFCC00), fontSize: 20, fontWeight: FontWeight.w900)),
-            ],
-          ),
+          // Distance
           Row(
             children: [
-              if (priorityPrice > 2.0)
-                IconButton(
-                  onPressed: () => setState(() => priorityPrice -= 0.5),
-                  icon: const Icon(Icons.remove_circle, color: Colors.white70, size: 30),
-                ),
-              IconButton(
-                onPressed: () => setState(() => priorityPrice += 0.5),
-                icon: const Icon(Icons.add_circle, color: Color(0xFFFFCC00), size: 40),
+              const Icon(Icons.straighten, color: Colors.white70, size: 18),
+              const SizedBox(width: 8),
+              Text("Distance: $distanceDisplay",
+                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Prix estimé total
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(isRecurring ? "Prix estimé / course" : "Prix estimé",
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text(priceDisplay,
+                      style: const TextStyle(color: Color(0xFFFFCC00), fontSize: 22, fontWeight: FontWeight.w900)),
+                ],
               ),
             ],
           ),
+          if (isRecurring && estimatedPrice != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.account_balance_wallet, color: Colors.orangeAccent, size: 16),
+                const SizedBox(width: 6),
+                Text("Total Période: $totalPeriodDisplay",
+                    style: const TextStyle(color: Colors.orangeAccent, fontSize: 14, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ],
+          const Divider(color: Colors.white24, height: 24),
+          // Détail de la formule
+          if (distanceKm != null) ...[
+            _buildPriceDetailRow("Prix de base", basePriceDisplay),
+            _buildPriceDetailRow("Distance (${distanceKm!.toStringAsFixed(1)} km × 0.500 DT)",
+                "${((distanceKm! * pricePerKm) / 1000).toStringAsFixed(3)} DT"),
+            _buildPriceDetailRow("Frais fixes", "0.900 DT"),
+          ],
+          const SizedBox(height: 12),
+          // Ajustement du prix de base par le client
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Expanded(
+                  child: Text("Augmenter le prix de base",
+                      style: TextStyle(color: Colors.white70, fontSize: 12)),
+                ),
+                Row(
+                  children: [
+                    if (clientBasePrice > basePriceDefault)
+                      IconButton(
+                        onPressed: () {
+                          setState(() => clientBasePrice -= 500);
+                          _calculatePrice();
+                        },
+                        icon: const Icon(Icons.remove_circle, color: Colors.white70, size: 28),
+                      ),
+                    Text(basePriceDisplay,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    IconButton(
+                      onPressed: () {
+                        setState(() => clientBasePrice += 500);
+                        _calculatePrice();
+                      },
+                      icon: const Icon(Icons.add_circle, color: Color(0xFFFFCC00), size: 28),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriceDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(value, style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -462,8 +604,14 @@ class _BookRideState extends State<BookRide> {
       width: double.infinity,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFCC00), padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-        onPressed: _handleBooking,
-        child: Text(isRecurring ? "Confirm Schedule" : "Book Now", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        onPressed: _isSubmitting ? null : _handleBooking,
+        child: _isSubmitting
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2.5),
+              )
+            : Text(isRecurring ? "Confirm Schedule" : "Book Now", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
       ),
     );
   }

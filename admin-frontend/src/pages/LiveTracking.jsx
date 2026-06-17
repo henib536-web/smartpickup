@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, ChevronRight, Phone } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 
 // Fix for default Leaflet icon (though we use custom icons, it's good practice)
@@ -16,9 +17,25 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const WS_URL = 'ws://127.0.0.1:8000/ws/admin/locations';
+const WS_URL = 'ws://127.0.0.1:8000/api/admin/locations/ws';
+
+function MapUpdater({ selectedDriver }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (selectedDriver && selectedDriver.latitude && selectedDriver.longitude) {
+      map.flyTo([selectedDriver.latitude, selectedDriver.longitude], 15, {
+        animate: true,
+        duration: 1.5
+      });
+    }
+  }, [selectedDriver, map]);
+  
+  return null;
+}
 
 export default function LiveTracking() {
+  const navigate = useNavigate();
   const [drivers, setDrivers] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -202,23 +219,56 @@ export default function LiveTracking() {
                     background: selectedDriver?.driver_id === driver.driver_id ? 'rgba(255, 204, 0, 0.1)' : 'rgba(255,255,255,0.02)',
                     border: selectedDriver?.driver_id === driver.driver_id ? '1px solid var(--accent-color)' : '1px solid transparent',
                     cursor: 'pointer',
-                    transition: 'all 0.2s'
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <p style={{ fontWeight: '600' }}>{driver.driver_name}</p>
-                    <span style={{ 
-                      fontSize: '0.7rem', 
-                      padding: '4px 8px', 
-                      borderRadius: '10px',
-                      backgroundColor: driver.status === 'available' ? 'rgba(74, 222, 128, 0.2)' : driver.status === 'occupied' ? 'rgba(248, 113, 113, 0.2)' : 'rgba(160, 160, 160, 0.2)',
-                      color: driver.status === 'available' ? '#4ade80' : driver.status === 'occupied' ? '#f87171' : '#a0a0a0'
-                    }}>
-                      {driver.status}
-                    </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <p style={{ fontWeight: '600' }}>{driver.driver_name}</p>
+                      <span style={{ 
+                        fontSize: '0.7rem', 
+                        padding: '4px 8px', 
+                        borderRadius: '10px',
+                        backgroundColor: driver.status === 'available' ? 'rgba(74, 222, 128, 0.2)' : driver.status === 'occupied' ? 'rgba(248, 113, 113, 0.2)' : 'rgba(160, 160, 160, 0.2)',
+                        color: driver.status === 'available' ? '#4ade80' : driver.status === 'occupied' ? '#f87171' : '#a0a0a0'
+                      }}>
+                        {driver.status}
+                      </span>
+                    </div>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '6px' }}>
+                      <Phone size={12} color="var(--text-secondary)" />
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        {driver.driver_phone || 'No spécifié'}
+                      </p>
+                    </div>
                   </div>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>ID: {driver.driver_id}</p>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Speed: {driver.speed} km/h</p>
+                  
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/drivers/${driver.driver_id}`);
+                    }}
+                    style={{
+                      marginLeft: '10px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: '32px',
+                      height: '32px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: 'var(--accent-color)'
+                    }}
+                    title="Voir les détails"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
                 </div>
               ))}
               {filteredDrivers.length === 0 && (
@@ -237,11 +287,13 @@ export default function LiveTracking() {
           >
             <TileLayer
               attribution='&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a>'
-              url="https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=YOUR_MAPBOX_TOKEN"
+              url="https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=pk.eyJ1IjoiaGVuaTg4MyIsImEiOiJjbW5pdHh0aGIwYTR0MnFyNjI4YTY5M3gxIn0.pcHfhkMrWoad2IWty-ZdyQ"
               className="map-tiles"
             />
             
-            {filteredDrivers.map(driver => (
+            <MapUpdater selectedDriver={selectedDriver} />
+            
+            {filteredDrivers.filter(d => d.latitude != null && d.longitude != null).map(driver => (
               <Marker 
                 key={driver.driver_id} 
                 position={[driver.latitude, driver.longitude]}

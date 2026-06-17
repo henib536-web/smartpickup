@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Float, Date, ForeignKey, DateTime
 from .user import User
 
 class Driver(User):
@@ -12,4 +12,5 @@ class Driver(User):
     average_rating = Column(Float, default=5.0)
     current_lat = Column(Float, nullable=True)
     current_lng = Column(Float, nullable=True)
+    last_location_update = Column(DateTime, nullable=True)
 

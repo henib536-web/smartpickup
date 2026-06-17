@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../env.dart'; 
+import 'package:url_launcher/url_launcher.dart';
 class Signup extends StatefulWidget {
   const Signup({super.key});
 
@@ -330,7 +331,27 @@ class _SignupState extends State<Signup> {
 
   Widget _buildPasswordField(TextEditingController c, String h) => Padding(padding: const EdgeInsets.only(top: 15), child: TextField(controller: c, obscureText: obscurePassword, style: const TextStyle(color: Colors.white), decoration: InputDecoration(hintText: h, suffixIcon: IconButton(icon: Icon(obscurePassword ? Icons.visibility_off : Icons.visibility), onPressed: () => setState(() => obscurePassword = !obscurePassword)), filled: true, fillColor: const Color(0xFF1A1A1A), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))));
 
-  Widget _buildTermsCheckbox() => Row(children: [Checkbox(value: terms, onChanged: (v) => setState(() => terms = v!), activeColor: Colors.amber), const Text('Accept Terms & Conditions', style: TextStyle(color: Colors.white70))]);
+  Widget _buildTermsCheckbox() => Row(children: [
+        Checkbox(value: terms, onChanged: (v) => setState(() => terms = v!), activeColor: Colors.amber),
+        const Text('Accept ', style: TextStyle(color: Colors.white70)),
+        GestureDetector(
+          onTap: _launchTermsPdf,
+          child: const Text(
+            'Terms & Conditions (PDF)',
+            style: TextStyle(
+              color: Colors.amber,
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        ),
+      ]);
+
+  Future<void> _launchTermsPdf() async {
+    final Uri url = Uri.parse('https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf'); // Remplacer par l'URL réelle du PDF
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) _showSnackBar("Impossible d'ouvrir le PDF", Colors.red);
+    }
+  }
 
   Widget _buildSubmitButton() => SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: isLoading ? null : handleSignup, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFCC00)), child: isLoading ? const CircularProgressIndicator() : const Text("SIGN UP", style: TextStyle(color: Colors.black))));
 }

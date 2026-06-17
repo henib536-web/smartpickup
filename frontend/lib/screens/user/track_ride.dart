@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../env.dart';
 
 /// Énumération pour les statuts de course
@@ -60,7 +61,14 @@ class _TrackRidePageState extends State<TrackRidePage>
 
   // Real data from backend
   Map<String, dynamic>? _fetchedDriverData;
+  String? _fetchedFare;
   Timer? _detailsTimer;
+
+  // Rating state
+  bool _ratingShown = false;
+  int _selectedRating = 0;
+  bool _isSubmittingRating = false;
+  final TextEditingController _commentController = TextEditingController();
 
   // Contrôleurs d'animation
   late AnimationController _carAnimationController;
@@ -132,6 +140,8 @@ class _TrackRidePageState extends State<TrackRidePage>
           print("CLIENT WS RECEIVED: $message");
           try {
             final dynamic decoded = (message is String) ? jsonDecode(message) : message;
+            // Ignore pong and other non-location messages
+            if (decoded['type'] != null && decoded['type'] != 'location_update') return;
             if (decoded['lat'] != null && decoded['lng'] != null) {
               final newLat = double.parse(decoded['lat'].toString());
               final newLng = double.parse(decoded['lng'].toString());
@@ -282,19 +292,270 @@ class _TrackRidePageState extends State<TrackRidePage>
             if (rideDetails['driver'] != null) {
               debugPrint("Driver found: ${rideDetails['driver']['name']}");
               _fetchedDriverData = rideDetails['driver'];
-              
+
               // Mettre à jour le statut si nécessaire
               if (rideDetails['status'] == 'ACCEPTED' && _rideStatus == RideStatus.confirmed) {
                 _rideStatus = RideStatus.driverAssigned;
+              } else if (rideDetails['status'] == 'IN_PROGRESS') {
+                _rideStatus = RideStatus.inProgress;
               }
             }
+
+            if (rideDetails['fare'] != null) {
+              _fetchedFare = rideDetails['fare'].toString();
+            } else if (rideDetails['estimated_price'] != null) {
+              _fetchedFare = "${(double.parse(rideDetails['estimated_price'].toString()) / 1000).toStringAsFixed(3)} DT";
+            }
+
+            // Détecter la fin de course → popup notation
+            if (rideDetails['status'] == 'COMPLETED') {
+              _rideStatus = RideStatus.completed;
+            }
           });
-          _initWebSocket();
+
+          // Afficher le popup de notation une seule fois
+          if (rideDetails['status'] == 'COMPLETED' && !_ratingShown) {
+            _ratingShown = true;
+            _detailsTimer?.cancel(); // Stop polling
+            _channel?.sink.close();  // Close WS
+            await Future.delayed(const Duration(milliseconds: 600));
+            if (mounted) _showRatingDialog(requestId);
+          } else {
+            _initWebSocket();
+          }
         }
       }
     } catch (e) {
       debugPrint("Error fetching ride details: $e");
     }
+  }
+
+  Future<void> _submitRating(int requestId) async {
+    if (_selectedRating == 0) return;
+    setState(() => _isSubmittingRating = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('user_id');
+
+      final response = await http.post(
+        Uri.parse('${Env.baseUrl}/rides/$requestId/rate'),
+        headers: {...Env.defaultHeaders},
+        body: jsonEncode({
+          'rating': _selectedRating,
+          'comment': _commentController.text.trim().isEmpty ? null : _commentController.text.trim(),
+          'user_id': userId,
+        }),
+      );
+
+      if (mounted) {
+        if (response.statusCode == 200) {
+          Navigator.of(context).pop(); // Fermer le dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Thank you for your rating!'),
+              backgroundColor: Color(0xFF22C55E),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: ${response.statusCode}'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Rating error: $e');
+    } finally {
+      if (mounted) setState(() => _isSubmittingRating = false);
+    }
+  }
+
+  void _showRatingDialog(int requestId) {
+    _selectedRating = 0;
+    _commentController.clear();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 420),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1a1a1a),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFF333333)),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFFFCC00).withOpacity(0.15),
+                  blurRadius: 40,
+                  spreadRadius: 4,
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header icon
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFFFCC00), Color(0xFFff9900)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFFFCC00).withOpacity(0.35),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.local_taxi_rounded, color: Colors.black, size: 36),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Title
+                  const Text(
+                    'Ride Completed!',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _fetchedDriverData != null
+                        ? 'How was your ride with ${_fetchedDriverData!["name"]}?'
+                        : 'How was your ride?',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 14, color: Color(0xFFa0a0a0)),
+                  ),
+                  const SizedBox(height: 28),
+
+                  // Stars
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(5, (i) {
+                        final star = i + 1;
+                        return GestureDetector(
+                          onTap: () => setDialogState(() => _selectedRating = star),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: const EdgeInsets.symmetric(horizontal: 6),
+                            child: Icon(
+                              star <= _selectedRating ? Icons.star_rounded : Icons.star_outline_rounded,
+                              color: star <= _selectedRating
+                                  ? const Color(0xFFFFCC00)
+                                  : const Color(0xFF555555),
+                              size: star <= _selectedRating ? 48 : 40,
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Star label
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: Text(
+                      _selectedRating == 0 ? 'Tap a star to rate'
+                          : _selectedRating == 1 ? 'Poor'
+                          : _selectedRating == 2 ? 'Fair'
+                          : _selectedRating == 3 ? 'Good'
+                          : _selectedRating == 4 ? 'Very Good'
+                          : 'Excellent!',
+                      key: ValueKey(_selectedRating),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _selectedRating == 0
+                            ? const Color(0xFF555555)
+                            : const Color(0xFFFFCC00),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Buttons
+                  Row(
+                    children: [
+                      // Skip
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFa0a0a0),
+                            side: const BorderSide(color: Color(0xFF333333)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text('Skip'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Submit
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton(
+                          onPressed: _selectedRating == 0 || _isSubmittingRating
+                              ? null
+                              : () => _submitRating(requestId),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFFCC00),
+                            foregroundColor: Colors.black,
+                            disabledBackgroundColor: const Color(0xFF333333),
+                            disabledForegroundColor: const Color(0xFF555555),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                          child: _isSubmittingRating
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.black,
+                                  ),
+                                )
+                              : const Text(
+                                  'Submit Rating',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _getRoute() async {
@@ -370,22 +631,10 @@ class _TrackRidePageState extends State<TrackRidePage>
 
   void _startRealTimeUpdates() {
     _updateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
       setState(() {
-        if (_rideStatus == RideStatus.driverApproaching && _eta > 0) {
-          _eta = math.max(0, _eta - 0.1);
-          _distance = math.max(0, _distance - 0.05);
-        } else if (_rideStatus == RideStatus.driverApproaching && _eta <= 0) {
-          _rideStatus = RideStatus.arrived;
-        }
-
         if (_rideStatus == RideStatus.inProgress) {
-          double totalDurationSeconds = (_realDuration ?? 5.0) * 60.0;
-          // Simulate faster for demo purposes (e.g., complete in 15-20 seconds)
-          _elapsedTime += (totalDurationSeconds / 20).ceil(); 
-          if (_elapsedTime >= totalDurationSeconds) {
-            _elapsedTime = totalDurationSeconds.toInt();
-            _rideStatus = RideStatus.completed;
-          }
+          _elapsedTime += 1;
         }
       });
     });
@@ -409,6 +658,7 @@ class _TrackRidePageState extends State<TrackRidePage>
     _channel?.sink.close();
     _carAnimationController.dispose();
     _fadeController.dispose();
+    _commentController.dispose();
     super.dispose();
   }
 
@@ -500,9 +750,12 @@ class _TrackRidePageState extends State<TrackRidePage>
       'scheduledTime': data?['scheduled_for'] != null 
           ? _formatIsoDate(data['scheduled_for']) 
           : '08:00 AM',
-      'fare': (data?['priority_price'] != null)
-          ? "${double.parse(data!['priority_price'].toString()).toStringAsFixed(3)} DT"
-          : (data?['fare']?.toString() ?? '2.000 DT'),
+      'fare': _fetchedFare ?? 
+              (data?['estimated_price'] != null
+                  ? "${(double.parse(data!['estimated_price'].toString()) / 1000).toStringAsFixed(3)} DT"
+                  : (data?['priority_price'] != null
+                      ? "${double.parse(data!['priority_price'].toString()).toStringAsFixed(3)} DT"
+                      : (data?['fare']?.toString() ?? 'Calcul...'))),
     };
   }
 
@@ -591,7 +844,7 @@ class _TrackRidePageState extends State<TrackRidePage>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Ride #${_rideData['id']} - Real-time tracking',
+                'REF-${_rideData['id'].toString().padLeft(4, '0')} - Real-time tracking',
                 style: const TextStyle(
                   fontSize: 16,
                   color: Color(0xFFa0a0a0),
@@ -1257,9 +1510,10 @@ class _TrackRidePageState extends State<TrackRidePage>
                   const Icon(Icons.directions_car, size: 64, color: Colors.black),
                   const SizedBox(height: 8),
                   const Text(
-                    'Ride in Progress',
+                    'Driver Arrived & In Progress',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 24,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
                       color: Colors.black,
                     ),
@@ -1494,12 +1748,18 @@ class _TrackRidePageState extends State<TrackRidePage>
                   color: Color(0xFFa0a0a0),
                 ),
               ),
-              Text(
-                _rideData['fare'],
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFFFCC00),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  _rideData['fare'],
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFFFCC00),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],

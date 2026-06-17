@@ -22,13 +22,29 @@ class DriverController:
         driver = db.query(Driver).filter(Driver.driver_id == user_id).first()
         if not driver:
             raise HTTPException(status_code=404, detail="Driver not found")
+        
+        # Also fetch total trips
+        taxi = db.query(Taxi).filter(Taxi.driver_id == user_id).first()
+        total_trips = 0
+        if taxi:
+            from app.models.ride_assignment import RideAssignment
+            from app.models.base_enums import AssignmentStatus
+            total_trips = db.query(RideAssignment).filter(
+                RideAssignment.taxi_id == taxi.taxi_id,
+                RideAssignment.status == AssignmentStatus.ACCEPTED
+            ).count()
+
         return {
             "user_id": driver.driver_id,
             "full_name": driver.full_name,
             "email": driver.email,
             "phone": driver.phone,
             "license_number": driver.license_number,
-            "average_rating": driver.average_rating
+            "average_rating": driver.average_rating,
+            "is_active": driver.is_active,
+            "is_available": driver.is_available,
+            "image_url": driver.image_url,
+            "total_trips": total_trips,
         }
 
     @staticmethod
@@ -52,6 +68,7 @@ class DriverController:
         if driver:
             driver.current_lat = lat
             driver.current_lng = lng
+            driver.last_location_update = datetime.utcnow()
             db.commit()
         return {"status": "success"}
 
@@ -66,7 +83,25 @@ class DriverController:
         return R * c
 
     @staticmethod
+    def auto_offline_stale_drivers(db: Session):
+        from datetime import datetime, timedelta
+        timeout_threshold = datetime.utcnow() - timedelta(minutes=5)
+        from sqlalchemy import or_
+        stale_drivers = db.query(Driver).filter(
+            Driver.is_available == True,
+            or_(
+                Driver.last_location_update == None,
+                Driver.last_location_update < timeout_threshold
+            )
+        ).all()
+        for d in stale_drivers:
+            d.is_available = False
+        if stale_drivers:
+            db.commit()
+
+    @staticmethod
     def _get_top_10_closest_drivers(db: Session, lat: float, lng: float):
+        DriverController.auto_offline_stale_drivers(db)
         drivers = db.query(Driver).filter(
             Driver.is_available == True,
             Driver.current_lat != None,
@@ -134,7 +169,10 @@ class DriverController:
                         dropoff_lng=schedule.dropoff_lng if hasattr(schedule, 'dropoff_lng') and schedule.dropoff_lng else 10.1,
                         scheduled_for=sched_datetime,
                         status=RideStatusEnum.PENDING,
-                        requested_at=now
+                        requested_at=now,
+                        # Copier le prix estimé et le prix prioritaire depuis le planning récurrent
+                        estimated_price=schedule.estimated_price,
+                        priority_price=float(schedule.priority_price) if schedule.priority_price is not None else 2.0,
                     )
                     db.add(new_ride)
                     db.commit()
@@ -174,7 +212,24 @@ class DriverController:
                     print(f"[WARNING] driver_id={driver_id} is marked as NOT available (is_available=False). Will be excluded from top10.")
                 print(f"[DEBUG] Driver {driver_id} position: lat={current_driver.current_lat}, lng={current_driver.current_lng}, is_available={current_driver.is_available}")
 
+        now = datetime.now()
+
         for ride, passenger in results:
+            # Check if ride is expired
+            is_expired = False
+            if ride.scheduled_for:
+                # Expire scheduled rides 15 minutes after their scheduled time
+                if (now - ride.scheduled_for).total_seconds() > 900:
+                    is_expired = True
+            else:
+                if ride.requested_at:
+                    # Expire ASAP rides after 15 minutes (900 seconds)
+                    if (now - ride.requested_at).total_seconds() > 900: 
+                        is_expired = True
+            
+            if is_expired:
+                continue
+
             # Check if this driver is among top 10 for this ride
             is_visible = True
             if current_driver and ride.pickup_lat and ride.pickup_lng:
@@ -222,6 +277,8 @@ class DriverController:
                 "distance_km": distance_km,
                 "time_mins": 12,
                 "priority_price": float(ride.priority_price) if ride.priority_price is not None else 2.0,
+                "estimated_price": ride.estimated_price,
+                "base_price": 3500,
             })
         
         # 3. SORT BY PRIORITY PRICE (Highest first)
@@ -322,8 +379,22 @@ class DriverController:
             RideRequest.status == RideStatusEnum.ACCEPTED
         ).order_by(RideRequest.scheduled_for.asc()).all()
         
+        now = datetime.now()
+        
         result = []
         for ride, passenger in rides:
+            is_today_and_active = False
+            
+            if ride.scheduled_for:
+                if ride.scheduled_for.date() == now.date() and ride.scheduled_for >= now:
+                    is_today_and_active = True
+            else:
+                if ride.requested_at and ride.requested_at.date() == now.date():
+                    is_today_and_active = True
+                    
+            if not is_today_and_active:
+                continue
+
             result.append({
                 "request_id": ride.request_id,
                 "passenger_name": passenger.full_name,
@@ -337,6 +408,8 @@ class DriverController:
                 "dropoff_lng": float(ride.dropoff_lng) if ride.dropoff_lng is not None else None,
                 "distance_km": 5.4, # Mock
                 "time_mins": 12, # Mock
+                "estimated_price": ride.estimated_price,
+                "base_price": 3500,
             })
         return result
 
@@ -412,10 +485,45 @@ class DriverController:
         if not taxi: return []
         assignments = db.query(RideAssignment).filter(RideAssignment.taxi_id == taxi.taxi_id, RideAssignment.status == AssignmentStatus.ACCEPTED).all()
         request_ids = [a.request_id for a in assignments]
-        return db.query(RideRequest).filter(
-            RideRequest.request_id.in_(request_ids), 
-            RideRequest.status.cast(String) == "COMPLETED"
-        ).all()
+        
+        now = datetime.now()
+        
+        rides_query = db.query(RideRequest, Passenger).outerjoin(
+            Passenger, RideRequest.passenger_id == Passenger.passenger_id
+        ).filter(
+            RideRequest.request_id.in_(request_ids),
+            RideRequest.status.cast(String).in_(["COMPLETED", "ACCEPTED"])
+        ).order_by(RideRequest.scheduled_for.desc()).all()
+        
+        result = []
+        for ride, passenger in rides_query:
+            status_str = str(ride.status)
+            is_passed = False
+            
+            if status_str == "ACCEPTED":
+                if ride.scheduled_for and ride.scheduled_for < now:
+                    is_passed = True
+                elif ride.scheduled_for is None and ride.requested_at and ride.requested_at.date() < now.date():
+                    is_passed = True
+                    
+                if not is_passed:
+                    continue # Skip accepted rides that are not passed yet
+            
+            # Format date
+            date_str = ride.scheduled_for.strftime("%Y-%m-%d %H:%M") if ride.scheduled_for else (ride.requested_at.strftime("%Y-%m-%d %H:%M") if ride.requested_at else "N/A")
+            
+            result.append({
+                "id": ride.request_id,
+                "date": date_str,
+                "pickup": ride.pickup_location,
+                "dropoff": ride.dropoff_location,
+                "duration": "12 mins", # mock
+                "rating": 5.0, # mock
+                "status": "completed" if status_str == "COMPLETED" else "passed",
+                "passenger": passenger.full_name if passenger else "Unknown"
+            })
+            
+        return result
 
     @staticmethod
     def update_ride_status(db: Session, request_id: int, action: str):
@@ -451,6 +559,55 @@ class DriverController:
         return {"status": "success", "message": f"Ride status updated to {ride.status}"}
 
     @staticmethod
+    def get_driver_stats(db: Session, user_id: int):
+        from sqlalchemy import func
+        driver = db.query(Driver).filter(Driver.driver_id == user_id).first()
+        if not driver:
+            raise HTTPException(status_code=404, detail="Driver not found")
+
+        taxi = db.query(Taxi).filter(Taxi.driver_id == user_id).first()
+        if not taxi:
+            return {
+                "completed_rides": 0,
+                "total_rides": 0,
+                "average_rating": float(driver.average_rating) if driver.average_rating else 0.0,
+                "acceptance_rate": 0.0,
+                "today_rides": 0,
+            }
+
+        # All assignments for this taxi
+        assignments = db.query(RideAssignment).filter(
+            RideAssignment.taxi_id == taxi.taxi_id
+        ).all()
+        request_ids = [a.request_id for a in assignments]
+
+        total_rides = len(request_ids)
+        completed_rides = 0
+        today_rides = 0
+        if request_ids:
+            completed_rides = db.query(func.count(RideRequest.request_id)).filter(
+                RideRequest.request_id.in_(request_ids),
+                RideRequest.status.cast(String) == "COMPLETED"
+            ).scalar() or 0
+
+            today_start = datetime.combine(datetime.now().date(), time(0, 0))
+            today_rides = db.query(func.count(RideRequest.request_id)).filter(
+                RideRequest.request_id.in_(request_ids),
+                RideRequest.status.cast(String).in_(["COMPLETED", "ACCEPTED", "IN_PROGRESS"]),
+                RideRequest.requested_at >= today_start
+            ).scalar() or 0
+
+        acceptance_rate = round(completed_rides / max(total_rides, 1) * 100, 1)
+
+        return {
+            "completed_rides": completed_rides,
+            "total_rides": total_rides,
+            "average_rating": float(driver.average_rating) if driver.average_rating else 0.0,
+            "acceptance_rate": acceptance_rate,
+            "today_rides": today_rides,
+        }
+
+    @staticmethod
     def get_taxi_info(db: Session, user_id: int):
         taxi = db.query(Taxi).filter(Taxi.driver_id == user_id).first()
         if not taxi:
@@ -462,5 +619,7 @@ class DriverController:
         driver = db.query(Driver).filter(Driver.driver_id == user_id).first()
         if driver:
             driver.is_available = is_online
+            if is_online:
+                driver.last_location_update = datetime.utcnow()
             db.commit()
         return {"status": "success", "is_online": is_online}

@@ -22,5 +22,7 @@ class RideRequest(Base):
     
     status = Column(Enum(RideStatusEnum), default=RideStatusEnum.PENDING)
     priority_price = Column(DECIMAL(10, 2), default=2.0)
+    distance_km = Column(DECIMAL(10, 2), nullable=True)
+    estimated_price = Column(Integer, nullable=True)  # Prix en millimes
     cancellation_reason = Column(String, nullable=True)
     cancelled_by = Column(Enum(CancelledBy), nullable=True)

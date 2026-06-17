@@ -6,7 +6,27 @@ from app.routes import user_routes, rides, notif_routes, driver_routes, admin_ro
 import app.models
 import os
 # Create tables
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    import sys
+    print("\n" + "="*80)
+    print("ERREUR DE CONNEXION A LA BASE DE DONNEES POSTGRESQL")
+    print("="*80)
+    print("Impossible de se connecter a la base de donnees PostgreSQL.")
+    print("Veuillez verifier que :")
+    print("1. Le service PostgreSQL (ex: postgresql-x64-18) est bien demarre.")
+    print("2. Les identifiants dans 'app/database/connection.py' sont corrects.")
+    print("3. La base de donnees 'smartpickup' existe.")
+    
+    if isinstance(e, UnicodeDecodeError):
+        print("\nNote : Une erreur d'encodage (UnicodeDecodeError) a ete detectee.")
+        print("Cela se produit sur Windows en francais lorsque PostgreSQL est arrete.")
+        print("Le message d'erreur systeme contient des caracteres accentues que psycopg2 n'arrive pas a decoder.")
+    else:
+        print(f"\nDetails : {e}")
+    print("="*80 + "\n")
+    sys.exit(1)
 
 app = FastAPI(title="Smart Pickup API")
 

@@ -112,7 +112,10 @@ class UserController:
         return {"status": "success", "message": "Mot de passe mis à jour avec succès"}
 
     @staticmethod
-    def update_fcm_token(db: Session, user_id: int, fcm_token: str):
+    def update_fcm_token(db: Session, user_id: int, fcm_token: str | None):
+        if fcm_token:
+            db.query(User).filter(User.fcm_token == fcm_token, User.user_id != user_id).update({"fcm_token": None})
+            
         user = db.query(User).filter(User.user_id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="Utilisateur non trouvé")

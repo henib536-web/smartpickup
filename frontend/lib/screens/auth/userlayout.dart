@@ -38,8 +38,9 @@ class _UserLayoutState extends State<UserLayout> {
     final routes = [
       "/user", 
       "/user/bookride", 
-      "/user/profile", 
       "/user/scheduled", 
+            "/user/profile", 
+
     ];
     if (index < routes.length) {
       Navigator.pushReplacementNamed(context, routes[index]);
@@ -51,8 +52,8 @@ class _UserLayoutState extends State<UserLayout> {
     switch (route) {
       case "/user": return 0;
       case "/user/bookride": return 1;
-      case "/user/profile": return 2;
-      case "/user/scheduled": return 3;
+      case "/user/profile": return 3;
+      case "/user/scheduled": return 2;
   
       default: return 0;
     }
@@ -65,9 +66,13 @@ class _UserLayoutState extends State<UserLayout> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
+        centerTitle: false,
+        automaticallyImplyLeading: false,
+        titleSpacing: 20.0,
         backgroundColor: const Color(0xFF0A0A0A),
         elevation: 0,
         title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               width: 36, height: 36,
@@ -120,8 +125,9 @@ class _UserLayoutState extends State<UserLayout> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
           BottomNavigationBarItem(icon: Icon(Icons.directions_car), label: "Book"),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
           BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: "Scheduled"),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
+
 
         ],
       ),

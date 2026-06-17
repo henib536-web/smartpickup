@@ -81,7 +81,11 @@ class _DriverActiveRideState extends State<DriverActiveRide>
   }
 
   void _initWebSocket() async {
-    if (_activeRide == null) return;
+    if (_activeRide == null) {
+      print("DRIVER WS: No active ride yet, skipping WS init");
+      return;
+    }
+    if (_locationChannel != null) return; // Already connected
     final rideId = _activeRide!['request_id'];
     try {
       final wsUrl = '${Env.baseUrl.replaceFirst('http', 'ws')}/rides/$rideId/ws';
@@ -100,6 +104,7 @@ class _DriverActiveRideState extends State<DriverActiveRide>
           _locationChannel = null;
         }
       );
+      print("DRIVER WS: Connected to ride $rideId");
     } catch (e) { 
       print('DRIVER WS INIT ERROR: $e'); 
       _locationChannel = null;
@@ -190,21 +195,24 @@ class _DriverActiveRideState extends State<DriverActiveRide>
 
   void _publishCurrentPositionToSocket() {
     if (_currentPosition == null || _activeRide == null) return;
-    if (_locationChannel == null) { _initWebSocket(); return; }
+    // If WS is closed, reconnect first and retry next tick
+    if (_locationChannel == null) {
+      _initWebSocket();
+      return;
+    }
     try {
-      final payload = {
+      final payload = jsonEncode({
         'lat': _currentPosition!.latitude, 
         'lng': _currentPosition!.longitude, 
         'timestamp': DateTime.now().toIso8601String(),
         'ride_id': _activeRide!['request_id'],
         'simulated': _simulateMode
-      };
-      final data = jsonEncode(payload);
-      _locationChannel!.sink.add(data);
-      print("DRIVER WS SENT: $data");
+      });
+      _locationChannel!.sink.add(payload);
+      print("DRIVER WS SENT: lat=${_currentPosition!.latitude}, lng=${_currentPosition!.longitude}");
     } catch (e) { 
       print("DRIVER WS SEND ERROR: $e");
-      _initWebSocket(); 
+      _locationChannel = null; // Mark as dead so next tick reconnects
     }
   }
 
@@ -434,7 +442,7 @@ class _DriverActiveRideState extends State<DriverActiveRide>
 
   Widget _buildPermissionDenied() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.location_off, color: Color(0xFFF87171), size: 72), const SizedBox(height: 20), const Text('Location required', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)), const SizedBox(height: 20), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFCC00), foregroundColor: Colors.black), onPressed: () async { final b = await _requestWebLocationPermission(); setState(() => _permissionGranted = b); if (b) _initLocationAndRide(); }, child: const Text('Allow Location'))]));
 
-  Widget _buildHeader() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Active Ride Tracking 🚕', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFFFFCC00))), const SizedBox(height: 8), Text(_activeRide != null ? 'Ride #${_activeRide!['request_id']} - Real-time tracking' : 'Available for rides', style: const TextStyle(fontSize: 16, color: Color(0xFFa0a0a0)))]);
+  Widget _buildHeader() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Active Ride Tracking 🚕', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFFFFCC00))), const SizedBox(height: 8), Text(_activeRide != null ? 'REF-${_activeRide!['request_id'].toString().padLeft(4, '0')} - Real-time tracking' : 'Available for rides', style: const TextStyle(fontSize: 16, color: Color(0xFFa0a0a0)))]);
 
   Widget _buildStatusProgressBar() {
     final steps = [{'l': 'Accepted', 'i': Icons.check_circle}, {'l': 'Arrived', 'i': Icons.location_on}, {'l': 'In Progress', 'i': Icons.directions_car}, {'l': 'Completed', 'i': Icons.flag}];
@@ -537,9 +545,12 @@ class _DriverActiveRideState extends State<DriverActiveRide>
             onChanged: (val) {
               setState(() => _isSharingLocation = val);
               if (val) {
+                // Connect WS immediately and publish first position right away
+                if (_locationChannel == null) _initWebSocket();
+                Future.delayed(const Duration(milliseconds: 300), _publishCurrentPositionToSocket);
                 _showSnack('Location sharing enabled! 📍', const Color(0xFF22C55E));
               } else {
-                _showSnack('Location sharing disabled', const Color(0xFF333333));
+                _showSnack('Location sharing disabled', Colors.grey);
               }
             },
           ),

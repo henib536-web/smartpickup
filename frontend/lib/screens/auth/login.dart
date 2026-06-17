@@ -8,6 +8,7 @@ import 'forgot_password.dart';
 import 'userlayout.dart';
 import '../../env.dart'; 
 import '../../services/fcm_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 class Login extends StatefulWidget {
   const Login({super.key});
 
@@ -59,7 +60,7 @@ class _LoginState extends State<Login> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
-        // --- CORRECTION : Sauvegarde de l'ID et du Token ---
+        //  Sauvegarde de l'ID et du Token 
         final prefs = await SharedPreferences.getInstance();
         const storage = FlutterSecureStorage();
         
@@ -87,16 +88,50 @@ class _LoginState extends State<Login> {
 
         if (context.mounted) {
           final String role = (data['role'] ?? 'commuter').toString();
-          Navigator.pushReplacementNamed(
-            context,
-            role == 'driver' ? '/driver/dashboard' : '/userlayout',
-          );
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Bienvenue ${data['full_name']}!'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          if (role == 'admin') {
+            final String token = data['access_token'] ?? '';
+            final String email = data['email'] ?? '';
+            final String name = data['full_name'] ?? '';
+            final int userId = data['user_id'] ?? data['id'] ?? 0;
+            
+            final Uri adminUri = Uri.parse(
+              'http://localhost:5173/?token=$token&user_id=$userId&email=${Uri.encodeComponent(email)}&full_name=${Uri.encodeComponent(name)}&role=admin'
+            );
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Connexion Admin réussie ! Redirection vers le dashboard...'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 3),
+              ),
+            );
+
+            try {
+              if (await canLaunchUrl(adminUri)) {
+                await launchUrl(adminUri, mode: LaunchMode.externalApplication);
+              } else {
+                throw 'Impossible d\'ouvrir l\'URL $adminUri';
+              }
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Erreur redirection : $e'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          } else {
+            Navigator.pushReplacementNamed(
+              context,
+              role == 'driver' ? '/driver/dashboard' : '/userlayout',
+            );
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Bienvenue ${data['full_name']}!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
         }
       } else {
         final error = json.decode(response.body);
@@ -162,7 +197,7 @@ class _LoginState extends State<Login> {
               ),
               const SizedBox(height: 20),
               const Text(
-                "Smart Pickup",
+                "SmartPickup",
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 28,

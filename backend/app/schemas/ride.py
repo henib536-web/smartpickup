@@ -22,6 +22,8 @@ class RideCreateRequest(BaseModel):
     end_date: Optional[datetime] = None
     selected_days: Optional[List[str]] = None
     priority_price: Optional[float] = 2.0
+    distance_km: Optional[float] = None
+    estimated_price: Optional[int] = None  # Prix en millimes
 
 
 class RideResponse(BaseModel):
@@ -47,3 +49,8 @@ class RideListItem(BaseModel):
     status: str
     is_recurring: bool
     recurring_day: Optional[str] = None
+    estimated_price: Optional[int] = None
+    distance_km: Optional[float] = None
+    rating: Optional[int] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None

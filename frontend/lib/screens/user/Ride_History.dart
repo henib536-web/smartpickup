@@ -89,9 +89,17 @@ class _RideHistoryState extends State<RideHistory> {
     // Calculate stats
     final totalRides = _historyRides.length;
     final completedRides = _historyRides.where((r) => r['status'] == 'COMPLETED').length;
-    final avgRating = _historyRides.where((r) => r['rating'] != null)
-        .fold(0.0, (sum, r) => sum + (r['rating'] as num)) / 
-        (_historyRides.where((r) => r['rating'] != null).length.clamp(1, 1000));
+    
+    double totalSpent = 0.0;
+    for (var r in _historyRides) {
+      if (r['status'] == 'COMPLETED') {
+        if (r['estimated_price'] != null) {
+          totalSpent += (r['estimated_price'] as num) / 1000;
+        } else if (r['price'] != null) {
+          totalSpent += (r['price'] as num).toDouble();
+        }
+      }
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -136,8 +144,7 @@ class _RideHistoryState extends State<RideHistory> {
               child: Column(
                 children: [
                   buildStatisticsHoverCard(0, "$totalRides", "Total Rides", Icons.directions_car, Colors.blueAccent),
-                  buildStatisticsHoverCard(1, "${(completedRides * 12.5).toStringAsFixed(1)} DT", "Total Spent", Icons.attach_money, Colors.greenAccent),
-                  buildStatisticsHoverCard(2, avgRating.toStringAsFixed(1), "Avg Rating", Icons.star, Colors.orangeAccent),
+                  buildStatisticsHoverCard(1, "${totalSpent.toStringAsFixed(1)} DT", "Total Spent", Icons.attach_money, Colors.greenAccent),
                 ],
               ),
             ),
@@ -162,9 +169,15 @@ class _RideHistoryState extends State<RideHistory> {
                   ride['pickup_location'] ?? 'Unknown',
                   ride['dropoff_location'] ?? 'Unknown',
                   ride['scheduled_for'] != null ? DateFormat('HH:mm').format(DateTime.parse(ride['scheduled_for'])) : "Now",
-                  ride['price'] != null ? "${ride['price']} DT" : "15 DT",
-                  "12 mins",
-                  ride['status'] == 'COMPLETED',
+                  ride['estimated_price'] != null 
+                      ? "${(ride['estimated_price'] / 1000).toStringAsFixed(1)} DT" 
+                      : (ride['price'] != null ? "${ride['price']} DT" : "-- DT"),
+                  ride['distance_km'] != null ? "${ride['distance_km'].toStringAsFixed(1)} km" : "--",
+                  ride['status']?.toString().toUpperCase() == 'COMPLETED',
+                  rating: ride['rating'],
+                  onRate: (ride['status']?.toString().toUpperCase() != 'CANCELLED' && ride['rating'] == null && ride['request_id'] != null)
+                      ? () => _showRatingDialog(ride['request_id'] as int)
+                      : null,
                 );
               }).toList(),
             const SizedBox(height: 40),
@@ -199,8 +212,10 @@ class _RideHistoryState extends State<RideHistory> {
     String days,
     String price,
     String duration,
-    bool isCompleted,
-  ) {
+    bool isCompleted, {
+    int? rating,
+    VoidCallback? onRate,
+  }) {
     return MouseRegion(
       onEnter: (_) => setState(() => hoverIndex = index),
       onExit: (_) => setState(() => hoverIndex = -1),
@@ -214,6 +229,77 @@ class _RideHistoryState extends State<RideHistory> {
         duration,
         isCompleted,
         hoverIndex == index,
+        rating: rating,
+        onRate: onRate,
+      ),
+    );
+  }
+
+  Future<void> _showRatingDialog(int requestId) async {
+    int rating = 5;
+    
+    return showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('Rate your ride', style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  return IconButton(
+                    icon: Icon(
+                      index < rating ? Icons.star : Icons.star_border,
+                      color: Colors.orangeAccent,
+                    ),
+                    onPressed: () {
+                      setDialogState(() => rating = index + 1);
+                    },
+                  );
+                }),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.redAccent)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final prefs = await SharedPreferences.getInstance();
+                final userId = prefs.getInt('user_id');
+                
+                final res = await http.post(
+                  Uri.parse('${Env.baseUrl}/rides/$requestId/rate'),
+                  headers: {
+                    ...Env.defaultHeaders,
+                    'Content-Type': 'application/json',
+                  },
+                  body: jsonEncode({
+                    'rating': rating,
+                    'comment': '',
+                    'user_id': userId,
+                  }),
+                );
+                
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  if (res.statusCode == 200) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Thank you for your rating!')),
+                    );
+                    _fetchHistory(); // refresh to show updated rating
+                  }
+                }
+              },
+              child: const Text('Submit'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -288,8 +374,10 @@ Widget buildScheduleCard(
   String price,
   String duration,
   bool isCompleted,
-  bool isHover,
-) {
+  bool isHover, {
+  int? rating,
+  VoidCallback? onRate,
+}) {
   return AnimatedContainer(
     duration: const Duration(milliseconds: 200),
     width: double.infinity,
@@ -428,14 +516,23 @@ Widget buildScheduleCard(
                   fontSize: 14,
                 ),
               ),
-              IconButton(
-                icon: const Icon(
-                  Icons.star,
-                  color: Colors.orangeAccent,
-                  size: 18,
+              if (rating != null)
+                Row(
+                  children: [
+                    const SizedBox(width: 8),
+                    Text(rating.toString(), style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                    const Icon(Icons.star, color: Colors.amber, size: 16),
+                  ],
+                )
+              else if (onRate != null)
+                IconButton(
+                  icon: const Icon(
+                    Icons.star_outline,
+                    color: Colors.orangeAccent,
+                    size: 20,
+                  ),
+                  onPressed: onRate,
                 ),
-                onPressed: () {},
-              ),
             ],
           ),
         ),

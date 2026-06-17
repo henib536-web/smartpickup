@@ -19,3 +19,5 @@ class RecurringSchedule(Base):
     dropoff_lng = Column(DECIMAL(11, 8), nullable=True)
     is_active = Column(Boolean, default=True)
     priority_price = Column(DECIMAL(10, 2), default=2.0)
+    distance_km = Column(DECIMAL(10, 2), nullable=True)
+    estimated_price = Column(Integer, nullable=True)

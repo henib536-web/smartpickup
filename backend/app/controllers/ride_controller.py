@@ -30,7 +30,21 @@ DAY_MAP = {
     "sunday": DayOfWeek.SUNDAY,
 }
 
+# Constantes de tarification (en millimes)
+BASE_PRICE = 3500       # Prix de base
+PRICE_PER_KM = 500      # Prix par km
+FIXED_FEE = 900          # Frais fixes
+
 class RideController:
+    @staticmethod
+    def calculate_price(distance_km: float, base_price: int = BASE_PRICE) -> int:
+        """Calcule le prix de la course en millimes.
+        Formule: base_price + (distance_km * 500) + 900
+        Le client peut augmenter le base_price (>= 3500)
+        """
+        if base_price < BASE_PRICE:
+            base_price = BASE_PRICE
+        return int(base_price + (distance_km * PRICE_PER_KM) + FIXED_FEE)
     @staticmethod
     def book_ride(db: Session, ride_in):
         try:
@@ -77,6 +91,18 @@ class RideController:
                         detail="selected_days is required for recurring schedule",
                     )
 
+                # Calcul du prix estimé pour la course récurrente
+                distance_km = ride_in.distance_km
+                client_base_price = int((ride_in.priority_price or 2.0) * 1000)
+                if client_base_price < BASE_PRICE:
+                    client_base_price = BASE_PRICE
+                
+                estimated_price = None
+                if distance_km is not None:
+                    estimated_price = RideController.calculate_price(distance_km, client_base_price)
+                elif ride_in.estimated_price is not None:
+                    estimated_price = ride_in.estimated_price
+
                 for day_str in ride_in.selected_days:
                     normalized_day = DAY_MAP.get(day_str.strip().lower())
                     if normalized_day is None:
@@ -98,6 +124,9 @@ class RideController:
                         pickup_lng=ride_in.pickup_lng,
                         dropoff_lat=ride_in.dropoff_lat,
                         dropoff_lng=ride_in.dropoff_lng,
+                        priority_price=ride_in.priority_price or 2.0,
+                        distance_km=distance_km,
+                        estimated_price=estimated_price,
                     )
                     db.add(schedule)
 
@@ -109,6 +138,17 @@ class RideController:
                 }
 
             # 4. CRÉATION D'UNE DEMANDE DE COURSE SIMPLE
+            # Calcul du prix estimé
+            distance_km = ride_in.distance_km
+            client_base_price = int((ride_in.priority_price or 2.0) * 1000)  # Convertir DT en millimes
+            if client_base_price < BASE_PRICE:
+                client_base_price = BASE_PRICE
+            estimated_price = None
+            if distance_km is not None:
+                estimated_price = RideController.calculate_price(distance_km, client_base_price)
+            elif ride_in.estimated_price is not None:
+                estimated_price = ride_in.estimated_price
+
             new_ride = RideRequest(
                 client_id=ride_in.client_id,
                 passenger_id=passenger.passenger_id,
@@ -123,6 +163,8 @@ class RideController:
                 status=RideStatusEnum.PENDING,
                 requested_at=datetime.utcnow(),
                 priority_price=ride_in.priority_price or 2.0,
+                distance_km=distance_km,
+                estimated_price=estimated_price,
             )
 
             db.add(new_ride)
@@ -196,6 +238,10 @@ class RideController:
         rides = db.query(RideRequest).filter(RideRequest.client_id == client_id).order_by(RideRequest.scheduled_for.desc()).all()
         schedules = db.query(RecurringSchedule).filter(RecurringSchedule.client_id == client_id).order_by(RecurringSchedule.start_date.desc(), RecurringSchedule.pickup_time.desc()).all()
 
+        # Récupérer les notes de l'utilisateur pour vérifier quelles courses ont déjà été notées
+        ratings = db.query(RideRating).filter(RideRating.user_id == client_id).all()
+        rating_map = {r.ride_id: r.rating for r in ratings}
+
         from app.schemas.ride import RideListItem
         ride_items = [
             RideListItem(
@@ -212,6 +258,9 @@ class RideController:
                 scheduled_for=r.scheduled_for,
                 status=r.status.value if r.status and hasattr(r.status, "value") else (str(r.status) if r.status else "UNKNOWN"),
                 is_recurring=r.schedule_id is not None,
+                estimated_price=r.estimated_price,
+                distance_km=float(r.distance_km) if r.distance_km else None,
+                rating=rating_map.get(r.request_id)
             )
             for r in rides
         ]
@@ -225,6 +274,10 @@ class RideController:
                 status="ACTIVE" if s.is_active else "CANCELLED",
                 is_recurring=True,
                 recurring_day=s.day_of_week.value if s.day_of_week and hasattr(s.day_of_week, "value") else (str(s.day_of_week) if s.day_of_week else "N/A"),
+                estimated_price=s.estimated_price,
+                distance_km=float(s.distance_km) if s.distance_km else None,
+                start_date=datetime.combine(s.start_date, datetime.min.time()) if s.start_date else None,
+                end_date=datetime.combine(s.end_date, datetime.min.time()) if s.end_date else None,
             )
             for s in schedules
         ]
@@ -280,14 +333,51 @@ class RideController:
         rating_val = payload.get("rating")
         if not rating_val:
             raise HTTPException(status_code=400, detail="Rating is required")
-        new_rating = RideRating(ride_id=request_id, user_id=payload.get("user_id"), rating=rating_val, comment=payload.get("comment"), created_at=datetime.utcnow())
+        
+        # Trouver le chauffeur assigné
+        assignment = db.query(RideAssignment).filter(
+            RideAssignment.request_id == request_id, 
+            RideAssignment.status == AssignmentStatus.ACCEPTED
+        ).first()
+        
+        driver_id = None
+        if assignment:
+            taxi = db.query(Taxi).filter(Taxi.taxi_id == assignment.taxi_id).first()
+            if taxi:
+                driver_id = taxi.driver_id
+
+        new_rating = RideRating(
+            ride_id=request_id, 
+            user_id=payload.get("user_id"), 
+            driver_id=driver_id,
+            rating=rating_val, 
+            comment=payload.get("comment"), 
+            created_at=datetime.utcnow()
+        )
         db.add(new_rating)
+        db.flush()
+
+        # Recalculer la moyenne du chauffeur
+        if driver_id:
+            from sqlalchemy.sql import func
+            avg_rating = db.query(func.avg(RideRating.rating)).filter(RideRating.driver_id == driver_id).scalar()
+            
+            driver = db.query(Driver).filter(Driver.driver_id == driver_id).first()
+            if driver and avg_rating is not None:
+                driver.average_rating = round(float(avg_rating), 2)
+
         db.commit()
         return {"status": "success", "message": "Rating submitted"}
 
     @staticmethod
     def report_incident(db: Session, request_id: int, payload: dict):
-        new_report = IncidentReport(ride_id=request_id, report_type=payload.get("report_type"), severity_level=payload.get("severity_level"), status="OPEN")
+        new_report = IncidentReport(
+            ride_id=request_id,
+            report_type=payload.get("report_type"),
+            severity_level=payload.get("severity_level"),
+            description=payload.get("description"),
+            status="OPEN"
+        )
         db.add(new_report)
         db.commit()
         return {"status": "success", "message": "Incident reported"}
@@ -324,6 +414,12 @@ class RideController:
                         "vehicle_plate": taxi.plate_number or "TUN-123"
                     }
 
+        # Calcul du prix estimé
+        if ride.estimated_price:
+            fare_val = f"{ride.estimated_price} millimes ({ride.estimated_price / 1000:.3f} DT)"
+        else:
+            fare_val = "Selon compteur"
+
         return {
             "request_id": ride.request_id,
             "pickup_location": ride.pickup_location,
@@ -335,6 +431,9 @@ class RideController:
             "status": ride.status.value if hasattr(ride.status, "value") else str(ride.status),
             "scheduled_for": ride.scheduled_for.isoformat() if ride.scheduled_for else None,
             "driver": driver_info,
+            "fare": fare_val,
+            "estimated_price": ride.estimated_price,
+            "distance_km": float(ride.distance_km) if ride.distance_km else None,
             "debug_assignment_found": assignment is not None,
             "debug_taxi_found": 'taxi' in locals() and taxi is not None
         }

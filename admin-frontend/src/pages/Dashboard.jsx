@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Users, Car, CheckCircle, Clock, TrendingUp,
-  AlertTriangle, XCircle, Activity
+  AlertTriangle, XCircle, Activity, UserPlus
 } from 'lucide-react';
 import axios from 'axios';
 import {
@@ -49,6 +50,7 @@ const donutOpts = (showLegend = true) => ({
 });
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats]       = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -68,7 +70,7 @@ export default function Dashboard() {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', flexDirection: 'column', gap: 16 }}>
         <div className="spinner" />
-        <p style={{ color: 'var(--text-secondary)' }}>Chargement…</p>
+        <p style={{ color: 'var(--text-secondary)' }}>Loading...</p>
       </div>
     );
   }
@@ -87,7 +89,7 @@ export default function Dashboard() {
   const revenueData = {
     labels,
     datasets: [{
-      label: 'Revenu (DT)',
+      label: 'Revenue (DT)',
       data: revDay,
       fill: true, tension: 0.45,
       borderColor: '#FFCC00', borderWidth: 2,
@@ -99,7 +101,7 @@ export default function Dashboard() {
   const ridesData = {
     labels,
     datasets: [{
-      label: 'Courses',
+      label: 'Rides',
       data: ridesDay,
       backgroundColor: 'rgba(255,204,0,0.75)',
       borderRadius: 8, borderSkipped: false,
@@ -108,7 +110,7 @@ export default function Dashboard() {
   };
 
   const rideStatusData = {
-    labels: ['Terminées', 'Annulées', 'En attente', 'Acceptées'],
+    labels: ['Completed', 'Cancelled', 'Pending', 'Accepted'],
     datasets: [{
       data: [rStatus.completed, rStatus.cancelled, rStatus.pending, rStatus.accepted],
       backgroundColor: [
@@ -123,7 +125,7 @@ export default function Dashboard() {
   };
 
   const driverStatusData = {
-    labels: ['Actifs', 'Inactifs/En attente'],
+    labels: ['Active', 'Inactifs/Pending'],
     datasets: [{
       data: [drivers.active, drivers.inactive],
       backgroundColor: ['rgba(74,222,128,0.8)', 'rgba(248,113,113,0.8)'],
@@ -176,60 +178,63 @@ export default function Dashboard() {
   return (
     <div>
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div style={{ marginBottom: '28px' }}>
-        <h1 style={{ fontSize: '2rem', marginBottom: '6px' }}>Tableau de Bord</h1>
-        <p style={{ color: 'var(--text-secondary)' }}>Statistiques basées sur les données réelles de la base.</p>
+      <div style={{ marginBottom: '28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 style={{ fontSize: '2rem', marginBottom: '6px' }}>Dashboard</h1>
+          <p style={{ color: 'var(--text-secondary)' }}>Statistics (system overview) </p>
+        </div>
+        
       </div>
 
       {/* ── KPI Cards ──────────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-        <StatCard title="Revenu Total"      value={(stats?.total_revenue ?? 0).toFixed(2)} suffix=" DT" icon={<TrendingUp size={22} />} color="255, 204, 0"   />
-        <StatCard title="Passagers"         value={stats?.total_users    ?? 0}                          icon={<Users size={22}       />} color="255, 255, 255" />
-        <StatCard title="Chauffeurs Actifs" value={drivers.active}                                      icon={<Car size={22}         />} color="74, 222, 128"  />
-        <StatCard title="En Attente Appro." value={stats?.pending_drivers ?? 0}                         icon={<Clock size={22}       />} color="255, 204, 0"   />
-        <StatCard title="Courses Total"     value={totalRides}                                          icon={<Activity size={22}    />} color="160, 160, 160" />
-        <StatCard title="Taux Complétion"   value={`${compRate}%`}                                      icon={<CheckCircle size={22} />} color="74, 222, 128"  />
-        <StatCard title="Taux Annulation"   value={`${cancelRate}%`}                                    icon={<XCircle size={22}     />} color="248, 113, 113" />
-        <StatCard title="Incidents Ouverts" value={incidents.open}                                      icon={<AlertTriangle size={22}/>} color="248, 113, 113"/>
+        <StatCard title="Total Revenue"      value={(stats?.total_revenue ?? 0).toFixed(2)} suffix=" DT" icon={<TrendingUp size={22} />} color="255, 204, 0"   />
+        <StatCard title="Passengers"         value={stats?.total_users    ?? 0}                          icon={<Users size={22}       />} color="255, 255, 255" />
+        <StatCard title="Active Drivers" value={drivers.active}                                      icon={<Car size={22}         />} color="74, 222, 128"  />
+        <StatCard title="Pending Approval" value={stats?.pending_drivers ?? 0}                         icon={<Clock size={22}       />} color="255, 204, 0"   />
+        <StatCard title="Total Rides"     value={totalRides}                                          icon={<Activity size={22}    />} color="160, 160, 160" />
+        <StatCard title="Completion Rate"   value={`${compRate}%`}                                      icon={<CheckCircle size={22} />} color="74, 222, 128"  />
+        <StatCard title="Cancellation Rate"   value={`${cancelRate}%`}                                    icon={<XCircle size={22}     />} color="248, 113, 113" />
+        <StatCard title="Open Incidents" value={incidents.open}                                      icon={<AlertTriangle size={22}/>} color="248, 113, 113"/>
       </div>
 
-      {/* ── Charts row 1: Revenu + Courses 7j ──────────────────────────────── */}
+      {/* ── Charts row 1: Revenu + Rides 7j ──────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px', marginBottom: '18px' }}>
         <ChartPanel
-          title="💰 Revenu — 7 derniers jours"
-          subtitle="Montants encaissés (ride_logs.amount_paid_cash)"
+          title="💰 Revenue — Last 7 Days"
+          subtitle="Collected amounts "
           height={220}
         >
           <Line data={revenueData} options={lineOpts} />
         </ChartPanel>
         <ChartPanel
-          title="🚕 Courses — 7 derniers jours"
-          subtitle="Nombre de demandes (ride_requests)"
+          title="🚕 Rides — Last 7 Days"
+          subtitle="Number of requests (ride_requests)"
           height={220}
         >
           <Bar data={ridesData} options={barOpts} />
         </ChartPanel>
       </div>
 
-      {/* ── Charts row 2: Statuts courses + Statuts chauffeurs ─────────────── */}
+      {/* ── Charts row 2: Statuss courses + Statuss chauffeurs ─────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' }}>
         <ChartPanel
-          title="📊 Répartition des Courses"
-          subtitle="Par statut — toutes les courses dans la DB"
+          title="📊 Rides Distribution"
+          subtitle="By status — all rides in the DB"
           height={230}
         >
-          <DonutCenter value={totalRides} label="courses" color="#FFCC00" />
+          <DonutCenter value={totalRides} label="rides" color="#FFCC00" />
           <Doughnut data={rideStatusData} options={donutOpts(true)} />
         </ChartPanel>
 
         <ChartPanel
-          title="👨‍✈️ Statut des Chauffeurs"
-          subtitle="Chauffeurs actifs vs en attente d'approbation"
+          title="👨‍✈️ Drivers Status"
+          subtitle="Active drivers vs pending approval"
           height={230}
         >
           <DonutCenter
             value={drivers.active + drivers.inactive}
-            label="chauffeurs"
+            label="drivers"
             color="#4ade80"
           />
           <Doughnut data={driverStatusData} options={donutOpts(true)} />

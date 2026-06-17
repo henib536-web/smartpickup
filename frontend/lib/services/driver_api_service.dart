@@ -194,4 +194,16 @@ class DriverApiService {
       throw Exception('Failed to load active ride');
     }
   }
+
+  Future<Map<String, dynamic>> getDriverStats() async {
+    final userId = await _getUserId();
+    if (userId == null) throw Exception("User ID not found");
+
+    final response = await http.get(Uri.parse('$baseUrl/stats/$userId'), headers: await _getHeaders());
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to load driver stats');
+    }
+  }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../auth/driver_layout.dart';
 import '../../services/driver_api_service.dart';
+import '../../env.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -71,6 +72,8 @@ class _DriverRequestsState extends State<DriverRequests> {
           'distance': '${e['distance_km'] ?? '?.?'} km',
           'duration': '${e['time_mins'] ?? '??'} min',
           'expiresIn': 0, 
+          'estimatedPrice': e['estimated_price'] != null ? '${((e['estimated_price'] as num) / 1000).toStringAsFixed(3)} DT' : 'N/A',
+          'basePrice': e['base_price'] != null ? '${((e['base_price'] as num) / 1000).toStringAsFixed(3)} DT' : '3.500 DT',
         }).toList();
         _isLoading = false;
       });
@@ -209,6 +212,21 @@ class _DriverRequestsState extends State<DriverRequests> {
                     ),
                     const SizedBox(height: 12),
                     Text('${req['distance']} • ${req['duration']}${req['distanceToPickup'] != null ? ' • ${req['distanceToPickup']}' : ''}', style: const TextStyle(fontSize: 12, color: Color(0xFFFFCC00), fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.payments, color: Colors.greenAccent, size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Prix Estimé: ${req['estimatedPrice']} (Base: ${req['basePrice']})',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.greenAccent,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 16),
                     Row(
                       children: [

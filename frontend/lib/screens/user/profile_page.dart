@@ -449,8 +449,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                SizedBox(width: 10),
-                                Icon(Icons.person, color: Colors.purple),
+                                
                               ],
                             ),
                             SizedBox(height: 5),
@@ -591,38 +590,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             const Divider(color: Colors.white10),
                             settingItem("Promotional offers", "Receive special deals and discounts", promoOffers, (v) => setState(() => promoOffers = v)),
                             const SizedBox(height: 20),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: () async {
-                                  final prefs = await SharedPreferences.getInstance();
-                                  final userId = prefs.getInt('user_id');
-                                  if (userId == null) return;
-
-                                  final response = await http.post(
-                                    Uri.parse('${Env.baseUrl}/users/test-notification/$userId'),
-                                    headers: Env.defaultHeaders,
-                                  );
-
-                                  if (response.statusCode == 200) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Test notification request sent!'), backgroundColor: Colors.green),
-                                    );
-                                  } else {
-                                    final data = jsonDecode(response.body);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(data['detail'] ?? 'Failed to send test notification'), backgroundColor: Colors.red),
-                                    );
-                                  }
-                                },
-                                icon: const Icon(Icons.send, color: Colors.black),
-                                label: const Text("Send Test Notification", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFFFCC00),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                              ),
-                            ),
+                            
                           ],
                         ),
                       ),
@@ -645,6 +613,16 @@ class _ProfilePageState extends State<ProfilePage> {
                               "Sign out of your account", 
                               onTap: () async {
                                 final prefs = await SharedPreferences.getInstance();
+                                final userId = prefs.getInt('user_id');
+                                // Effacer le token FCM du backend pour éviter les notifs croisées
+                                if (userId != null) {
+                                  try {
+                                    await http.delete(
+                                      Uri.parse('${Env.baseUrl}/users/fcm-token/$userId'),
+                                      headers: Env.defaultHeaders,
+                                    );
+                                  } catch (_) {}
+                                }
                                 await prefs.clear();
                                 if (mounted) Navigator.pushReplacementNamed(context, "/");
                               },

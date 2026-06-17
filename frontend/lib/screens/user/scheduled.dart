@@ -40,9 +40,14 @@ class _ScheduledState extends State<Scheduled> {
       final List<dynamic> data = jsonDecode(res.body);
       final now = DateTime.now();
       
-      // Filter only future rides (or recurring ones)
+      // Filter only future rides (or recurring ones) that are not completed/cancelled
       return data.where((ride) {
-        if (ride['is_recurring'] == true) return true;
+        final status = (ride['status'] ?? '').toString().toUpperCase();
+        if (status == 'COMPLETED' || status == 'CANCELLED') return false;
+
+        // Keep the recurring schedule templates themselves in upcoming list
+        if (ride['item_type'] == 'recurring_schedule') return true;
+
         if (ride['scheduled_for'] == null) return true; // Urgent rides
         try {
           final schedDate = DateTime.parse(ride['scheduled_for']);
@@ -211,6 +216,31 @@ class _ScheduledState extends State<Scheduled> {
     }
   }
 
+  int _getOccurrences(String startIso, String endIso, String dayName) {
+    try {
+      final start = DateTime.parse(startIso);
+      final end = DateTime.parse(endIso);
+      int targetWeekday;
+      switch (dayName.toUpperCase()) {
+        case 'MONDAY': targetWeekday = DateTime.monday; break;
+        case 'TUESDAY': targetWeekday = DateTime.tuesday; break;
+        case 'WEDNESDAY': targetWeekday = DateTime.wednesday; break;
+        case 'THURSDAY': targetWeekday = DateTime.thursday; break;
+        case 'FRIDAY': targetWeekday = DateTime.friday; break;
+        case 'SATURDAY': targetWeekday = DateTime.saturday; break;
+        case 'SUNDAY': targetWeekday = DateTime.sunday; break;
+        default: return 0;
+      }
+      int count = 0;
+      for (var d = start; d.isBefore(end.add(const Duration(days: 1))); d = d.add(const Duration(days: 1))) {
+        if (d.weekday == targetWeekday) count++;
+      }
+      return count;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Color _statusColor(String status) {
     switch (status.toUpperCase()) {
       case 'PENDING':
@@ -307,10 +337,32 @@ class _ScheduledState extends State<Scheduled> {
                             : (isRecurring
                                 ? 'Recurring schedule'
                                 : 'Single ride');
+                        
+                        String priceText = '';
+                        String totalPriceText = '';
+                        if (ride['estimated_price'] != null) {
+                          double priceDT = (ride['estimated_price'] as num) / 1000;
+                          priceText = '${priceDT.toStringAsFixed(1)} DT / course';
+                          
+                          if (itemType == 'recurring_schedule') {
+                            final startRaw = ride['start_date'];
+                            final endRaw = ride['end_date'];
+                            final dayRaw = ride['recurring_day']?.toString() ?? '';
+                            // Le backend renvoie parfois "DayOfWeek.MONDAY" → on extrait le jour
+                            final dayName = dayRaw.contains('.') ? dayRaw.split('.').last : dayRaw;
+
+                            if (startRaw != null && endRaw != null && dayName.isNotEmpty) {
+                              int count = _getOccurrences(startRaw.toString(), endRaw.toString(), dayName);
+                              if (count > 0) {
+                                totalPriceText = 'Total période: ${(priceDT * count).toStringAsFixed(1)} DT ($count courses)';
+                              }
+                            }
+                          }
+                        }
+
                         return buildScheduleCard(
-                          itemType == 'recurring_schedule'
-                              ? 'Schedule #$itemId'
-                              : 'Ride #$itemId',
+                          context,
+                          'REF-${itemId.toString().padLeft(4, '0')}',
                           'Status: $status',
                           ride['pickup_location'] ?? 'Unknown pickup',
                           ride['dropoff_location'] ?? 'Unknown dropoff',
@@ -321,6 +373,8 @@ class _ScheduledState extends State<Scheduled> {
                           scheduleLabel,
                           isRecurring,
                           isAccepted || status.toUpperCase() == 'ACTIVE',
+                          price: priceText,
+                          totalPrice: totalPriceText,
                           onCancel: itemType == 'recurring_schedule'
                               ? (status.toUpperCase() == 'ACTIVE'
                                   ? () => _cancelSchedule(
@@ -406,6 +460,7 @@ Widget buildScheduledDashboard(
 }
 
 Widget buildScheduleCard(
+  BuildContext context,
   String title,
   String subtitle,
   String pickup,
@@ -414,22 +469,49 @@ Widget buildScheduleCard(
   String days,
   bool isRecurring,
   bool isActive, {
+  String? price,
+  String? totalPrice,
   VoidCallback? onCancel,
   VoidCallback? onTrack,
   VoidCallback? onRate,
   VoidCallback? onReport,
   Color statusColor = Colors.white,
 }) {
-  return Container(
-    width: double.infinity,
-    margin: const EdgeInsets.symmetric(vertical: 8),
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.grey[900],
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: Colors.white12),
-    ),
-    child: Stack(
+  return GestureDetector(
+    onLongPress: onCancel != null ? () {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('Cancel Reservation?', style: TextStyle(color: Colors.white)),
+          content: const Text('Are you sure you want to cancel this reservation?', style: TextStyle(color: Colors.grey)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('No', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                onCancel();
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+              child: const Text('Yes, Cancel', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+    } : null,
+    child: Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Stack(
       children: [
         /// 🔥 CONTENT
         Column(
@@ -577,6 +659,28 @@ Widget buildScheduleCard(
                 ),
               ],
             ),
+            
+            if (price != null && price.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.attach_money, color: Colors.greenAccent, size: 14),
+                  const SizedBox(width: 5),
+                  Text("Prix Estimé: $price", style: const TextStyle(color: Colors.greenAccent, fontSize: 13, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
+            
+            if (totalPrice != null && totalPrice.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.account_balance_wallet, color: Colors.orangeAccent, size: 14),
+                  const SizedBox(width: 5),
+                  Text(totalPrice, style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)),
+                ],
+              ),
+            ],
           ],
         ),
 
@@ -623,5 +727,6 @@ Widget buildScheduleCard(
         ),
       ],
     ),
+   ),
   );
 }

@@ -54,17 +54,29 @@ class ConnectionManager:
         if ride_id not in self.active_connections:
             self.active_connections[ride_id] = []
         self.active_connections[ride_id].append(websocket)
+        print(f"WS CONNECT: ride_id={ride_id}, total_connections={len(self.active_connections[ride_id])}")
 
     def disconnect(self, websocket: WebSocket, ride_id: int):
         if ride_id in self.active_connections and websocket in self.active_connections[ride_id]:
             self.active_connections[ride_id].remove(websocket)
             if len(self.active_connections[ride_id]) == 0:
                 del self.active_connections[ride_id]
+        print(f"WS DISCONNECT: ride_id={ride_id}")
 
-    async def broadcast_to_ride(self, message: dict, ride_id: int):
-        if ride_id in self.active_connections:
-            for connection in self.active_connections[ride_id]:
+    async def broadcast_to_ride(self, message: dict, ride_id: int, sender: WebSocket = None):
+        """Broadcast a message to all clients on a ride, excluding the sender."""
+        if ride_id not in self.active_connections:
+            return
+        dead = []
+        for connection in self.active_connections[ride_id]:
+            if connection is sender:
+                continue  # Don't echo back to the driver who sent it
+            try:
                 await connection.send_json(message)
+            except Exception:
+                dead.append(connection)
+        for d in dead:
+            self.active_connections[ride_id].remove(d)
 
 manager = ConnectionManager()
 
@@ -74,8 +86,15 @@ async def websocket_ride_endpoint(websocket: WebSocket, request_id: int):
     try:
         while True:
             data = await websocket.receive_json()
+            # If it's a ping from the client, ignore it
+            if data.get("type") == "client_ping":
+                await websocket.send_json({"type": "pong"})
+                continue
             # The driver sends {"lat": 36.8, "lng": 10.1}
-            # We broadcast it to everyone connected to this ride
-            await manager.broadcast_to_ride(data, request_id)
+            # Add type so client can identify it as a location update
+            data["type"] = "location_update"
+            print(f"WS BROADCAST: ride_id={request_id}, lat={data.get('lat')}, lng={data.get('lng')}")
+            # Broadcast to all OTHER connections on this ride (not back to driver)
+            await manager.broadcast_to_ride(data, request_id, sender=websocket)
     except WebSocketDisconnect:
         manager.disconnect(websocket, request_id)

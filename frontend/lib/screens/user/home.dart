@@ -61,27 +61,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   String _userName = "User";
 
   final List<NewsItem> news = [
-    NewsItem(
-      id: 1,
-      title: "New Safety Features Available",
-      description: "Now you can share live location with up to 5 emergency contacts",
-      time: "2 hours ago",
-      type: "feature",
-    ),
-    NewsItem(
-      id: 2,
-      title: "Your Driver John Rated 5 Stars",
-      description: "Thank you for your feedback on your last ride",
-      time: "1 day ago",
-      type: "rating",
-    ),
-    NewsItem(
-      id: 3,
-      title: "Monthly Report Ready",
-      description: "Your February transportation report is ready to download",
-      time: "3 days ago",
-      type: "report",
-    ),
+   NewsItem(
+  id: 1,
+  title: "New Safety Features Will Be Available",
+  description: "You will soon be able to share your live location with up to 5 emergency contacts",
+  time: "Coming soon",
+  type: "feature",
+),
+
+NewsItem(
+  id: 2,
+  title: "Your Driver Will Be Able to Receive Ratings",
+  description: "You will be able to rate your driver after each ride",
+  time: "Next update",
+  type: "rating",
+),
+
+NewsItem(
+  id: 3,
+  title: "Monthly Report Will Be Available",
+  description: "Your transportation report will be ready for download at the end of the month",
+  time: "End of month",
+  type: "report",
+),
   ];
 
   @override
@@ -108,11 +110,32 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _totalRides = ridesData.length;
         
         // Filter and map to RideData
-        // Only show PENDING or ACCEPTED rides as "Upcoming"
+        // Only show PENDING or ACCEPTED rides as "Upcoming" and strictly filter out expired dates
         final now = DateTime.now();
         upcomingRides = ridesData.where((e) {
           final status = e['status'];
-          return status == 'PENDING' || status == 'ACCEPTED' || status == 'ACTIVE';
+          bool validStatus = status == 'PENDING' || status == 'ACCEPTED' || status == 'ACTIVE';
+          
+          bool isFuture = true;
+          if (e['scheduled_for'] != null) {
+            try {
+              final sched = DateTime.parse(e['scheduled_for']);
+              // On n'affiche jamais une course dont la date est strictement dépassée
+              if (sched.isBefore(now)) {
+                isFuture = false;
+              }
+            } catch (_) {}
+          } else if (e['requested_at'] != null) {
+            try {
+              final reqAt = DateTime.parse(e['requested_at']);
+              // Les courses ASAP expirent après 15 minutes (comme côté backend)
+              if (reqAt.add(const Duration(minutes: 15)).isBefore(now)) {
+                isFuture = false;
+              }
+            } catch (_) {}
+          }
+          
+          return validStatus && isFuture;
         }).take(3).map((e) {
           DateTime? sched;
           if (e['scheduled_for'] != null) {
@@ -400,14 +423,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               ),
               TextButton.icon(
                 onPressed: () {
-                  // Navigate to scheduled page
+                  Navigator.pushNamed(context, '/user/scheduled');
                 },
-                icon: const Icon(Icons.arrow_forward, size: 16, color: Color(0xFFFFCC00)),
+                icon: const Icon(Icons.arrow_forward, size: 15, color: Color(0xFFFFCC00)),
                 label: const Text(
                   "View All",
                   style: TextStyle(
                     color: Color(0xFFFFCC00),
-                    fontSize: 14,
+                    fontSize: 8,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -477,17 +500,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     Expanded(
                       child: Text(
                         ride.pickup,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                    const Icon(Icons.arrow_forward, color: Color(0xFFa0a0a0), size: 16),
-                    const SizedBox(width: 8),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8.0),
+                      child: Icon(Icons.arrow_forward, color: Color(0xFFa0a0a0), size: 16),
+                    ),
                     Expanded(
                       child: Text(
                         ride.dropoff,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
@@ -543,11 +572,14 @@ color: Colors.blue.shade400,
       children: [
         Icon(icon, color: const Color(0xFFa0a0a0), size: 16),
         const SizedBox(width: 4),
-        Text(
-          text,
-          style: const TextStyle(
-            color: Color(0xFFa0a0a0),
-            fontSize: 13,
+        Flexible(
+          child: Text(
+            text,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFFa0a0a0),
+              fontSize: 13,
+            ),
           ),
         ),
       ],
@@ -572,7 +604,7 @@ color: Colors.blue.shade400,
           const SizedBox(height: 16),
           TextButton(
             onPressed: () {
-              // Navigate to book ride
+              Navigator.pushNamed(context, '/user/bookride');
             },
             child: const Text(
               "Book your first ride",
@@ -926,8 +958,8 @@ color: Colors.blue.shade400,
   // Build Why Choose Section
   Widget _buildWhyChooseSection(bool isDesktop) {
     final stats = [
-      {"value": "10K+", "label": "Happy Users"},
-      {"value": "500+", "label": "Verified Drivers"},
+      {"value": "", "label": "Happy Users"},
+      {"value": "", "label": "Verified Drivers"},
       {"value": "4.9", "label": "Average Rating"},
       {"value": "24/7", "label": "Support"},
     ];

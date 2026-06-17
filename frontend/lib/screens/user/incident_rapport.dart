@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../env.dart';
 
 /// Page de signalement d'incident
@@ -33,6 +34,128 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
   final ImagePicker _picker = ImagePicker();
   final TextEditingController _descriptionController = TextEditingController();
 
+  // Données de courses de l'utilisateur (chargées du backend)
+  List<Map<String, dynamic>> _userRides = [];
+  bool _isLoadingRides = false;
+  Map<String, dynamic>? _selectedRideDetails;
+  bool _isLoadingRideDetails = false;
+
+  List<Map<String, dynamic>> get _completedRides => _userRides;
+
+  Future<void> _fetchUserRides() async {
+    setState(() {
+      _isLoadingRides = true;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('user_id');
+      if (userId == null) return;
+
+      final uri = Uri.parse('${Env.baseUrl}/rides/user/$userId');
+      final res = await http.get(uri, headers: Env.defaultHeaders);
+
+      if (res.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(res.body);
+        final now = DateTime.now();
+        setState(() {
+          _userRides = data.where((ride) {
+            final status = (ride['status'] ?? '').toString().toUpperCase();
+            if (status == 'COMPLETED' || status == 'CANCELLED') return true;
+            
+            if (ride['scheduled_for'] != null) {
+              try {
+                final schedDate = DateTime.parse(ride['scheduled_for']);
+                return schedDate.isBefore(now);
+              } catch (_) {}
+            }
+            return false;
+          }).map((e) {
+            final map = e as Map<String, dynamic>;
+            final dynamic idVal = map['item_type'] == 'recurring_schedule' ? map['schedule_id'] : map['request_id'];
+            final String prefix = map['item_type'] == 'recurring_schedule' ? 'S' : 'R';
+            final String rawId = idVal?.toString() ?? '';
+            
+            String formattedDate = 'Plan récurrent';
+            if (map['scheduled_for'] != null) {
+              try {
+                final dt = DateTime.parse(map['scheduled_for']);
+                formattedDate = '${dt.day}/${dt.month}/${dt.year} - ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+              } catch (_) {
+                formattedDate = map['scheduled_for'].toString();
+              }
+            }
+            
+            return {
+              'id': rawId,
+              'displayId': '$prefix-$rawId',
+              'date': formattedDate,
+              'pickup': map['pickup_location'] ?? 'Inconnu',
+              'dropoff': map['dropoff_location'] ?? 'Inconnu',
+              'driver': 'Non assigné',
+              'fare': 'Selon compteur',
+              'status': map['status'] ?? 'UNKNOWN',
+              'item_type': map['item_type'] ?? 'ride_request',
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching user rides: $e');
+    } finally {
+      setState(() {
+        _isLoadingRides = false;
+      });
+    }
+  }
+
+  Future<void> _fetchRideDetails(String rideId) async {
+    setState(() {
+      _isLoadingRideDetails = true;
+      _selectedRideDetails = null;
+    });
+    try {
+      final intId = int.tryParse(rideId);
+      if (intId == null) return;
+      
+      final uri = Uri.parse('${Env.baseUrl}/rides/$intId');
+      final res = await http.get(uri, headers: Env.defaultHeaders);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        
+        String formattedDate = 'N/A';
+        if (data['scheduled_for'] != null) {
+          try {
+            final dt = DateTime.parse(data['scheduled_for']);
+            formattedDate = '${dt.day}/${dt.month}/${dt.year} - ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+          } catch (_) {
+            formattedDate = data['scheduled_for'].toString();
+          }
+        }
+        
+        final driverMap = data['driver'] as Map<String, dynamic>?;
+        final driverName = driverMap != null ? driverMap['name'] : 'Non assigné';
+        
+        setState(() {
+          _selectedRideDetails = {
+            'id': rideId,
+            'date': formattedDate,
+            'pickup': data['pickup_location'] ?? 'Inconnu',
+            'dropoff': data['dropoff_location'] ?? 'Inconnu',
+            'driver': driverName,
+            'fare': data['fare'] != null ? (data['fare'].toString() == 'Selon compteur' ? 'Selon compteur' : '${data['fare']} DT') : 'Selon compteur',
+            'status': data['status'] ?? 'UNKNOWN',
+          };
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching ride details: $e');
+    } finally {
+      setState(() {
+        _isLoadingRideDetails = false;
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -46,6 +169,11 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
       parent: _animationController,
       curve: Curves.easeIn,
     );
+    
+    _fetchUserRides();
+    if (_selectedRideId != null) {
+      _fetchRideDetails(_selectedRideId!);
+    }
   }
 
   @override
@@ -54,55 +182,6 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
     _descriptionController.dispose();
     super.dispose();
   }
-
-  // Données de courses terminées
-  final List<Map<String, dynamic>> _completedRides = [
-    {
-      'id': 'R-2024',
-      'date': 'Apr 5, 2026 - 08:00 AM',
-      'pickup': '123 Main Street, Downtown',
-      'dropoff': '456 School Road, Oakville',
-      'driver': 'Michael Rodriguez',
-      'fare': '\$18.50',
-      'status': 'complete',
-    },
-    {
-      'id': 'R-2023',
-      'date': 'Apr 4, 2026 - 02:30 PM',
-      'pickup': '789 Park Avenue',
-      'dropoff': '321 Oak Street',
-      'driver': 'Sarah Johnson',
-      'fare': '\$24.00',
-      'status': 'complete',
-    },
-    {
-      'id': 'R-2022',
-      'date': 'Apr 3, 2026 - 09:15 AM',
-      'pickup': '555 Business Center',
-      'dropoff': '999 Shopping Mall',
-      'driver': 'David Chen',
-      'fare': '\$31.75',
-      'status': 'complete',
-    },
-    {
-      'id': 'R-2021',
-      'date': 'Apr 2, 2026 - 06:45 PM',
-      'pickup': '111 Restaurant Row',
-      'dropoff': '222 Residential Ave',
-      'driver': 'Emma Williams',
-      'fare': '\$15.25',
-      'status': 'complete',
-    },
-    {
-      'id': 'R-2020',
-      'date': 'Apr 1, 2026 - 11:00 AM',
-      'pickup': '777 Airport Terminal',
-      'dropoff': '888 Hotel Plaza',
-      'driver': 'James Brown',
-      'fare': '\$42.50',
-      'status': 'complete',
-    },
-  ];
 
   // Types d'incidents
   final List<Map<String, dynamic>> _incidentTypes = [
@@ -276,6 +355,7 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
       _description = '';
       _descriptionController.clear();
       _selectedRideId = null;
+      _selectedRideDetails = null;
       _photos.clear();
     });
   }
@@ -285,7 +365,7 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
         orElse: () => _severityLevels[2],
       );
 
-  Map<String, dynamic>? get _selectedRide => _completedRides.firstWhere(
+  Map<String, dynamic>? get _selectedRide => _selectedRideDetails ?? _completedRides.firstWhere(
         (ride) => ride['id'] == _selectedRideId,
         orElse: () => {},
       );
@@ -778,7 +858,7 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
                   Expanded(
                     child: Text(
                       _selectedRideId != null
-                          ? '$_selectedRideId - ${_selectedRide!['date']}'
+                          ? '${_selectedRide?['displayId'] ?? _selectedRideId} - ${_selectedRide?['date'] ?? ''}'
                           : 'Sélectionnez une course',
                       style: TextStyle(
                         color: _selectedRideId != null
@@ -808,165 +888,176 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
                 border: Border.all(color: const Color(0xFF333333)),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  // Option "Aucune"
-                  InkWell(
-                    onTap: () {
-                      setState(() {
-                        _selectedRideId = null;
-                        _isRideDropdownOpen = false;
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: Color(0xFF333333)),
+              child: _isLoadingRides
+                  ? const Padding(
+                      padding: EdgeInsets.all(24.0),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFFFCC00),
                         ),
                       ),
-                      child: const Text(
-                        'Aucune course sélectionnée',
-                        style: TextStyle(
-                          color: Color(0xFFa0a0a0),
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                  ),
-                  
-                  // Liste des courses
-                  ..._completedRides.map((ride) {
-                    final isSelected = _selectedRideId == ride['id'];
-                    return InkWell(
-                      onTap: () {
-                        setState(() {
-                          _selectedRideId = ride['id'];
-                          _isRideDropdownOpen = false;
-                        });
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? const Color(0xFFFFCC00).withOpacity(0.1)
-                              : Colors.transparent,
-                          border: const Border(
-                            bottom: BorderSide(color: Color(0xFF333333)),
+                    )
+                  : ListView(
+                      shrinkWrap: true,
+                      children: [
+                        // Option "Aucune"
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _selectedRideId = null;
+                              _selectedRideDetails = null;
+                              _isRideDropdownOpen = false;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: const BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(color: Color(0xFF333333)),
+                              ),
+                            ),
+                            child: const Text(
+                              'Aucune course sélectionnée',
+                              style: TextStyle(
+                                color: Color(0xFFa0a0a0),
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                           ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  ride['id'],
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFFFFCC00),
-                                  ),
+                        
+                        // Liste des courses
+                        ..._completedRides.map((ride) {
+                          final isSelected = _selectedRideId == ride['id'];
+                          return InkWell(
+                            onTap: () {
+                              setState(() {
+                                _selectedRideId = ride['id'];
+                                _isRideDropdownOpen = false;
+                              });
+                              _fetchRideDetails(ride['id']);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFFFFCC00).withOpacity(0.1)
+                                    : Colors.transparent,
+                                border: const Border(
+                                  bottom: BorderSide(color: Color(0xFF333333)),
                                 ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      const Icon(Icons.calendar_today,
-                                          size: 16, color: Color(0xFFa0a0a0)),
-                                      const SizedBox(width: 4),
+                                      Text(
+                                        ride['displayId'] ?? ride['id'],
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFFFFCC00),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
                                       Flexible(
-                                        child: Text(
-                                          ride['date'],
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Color(0xFFa0a0a0),
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.calendar_today,
+                                                size: 16, color: Color(0xFFa0a0a0)),
+                                            const SizedBox(width: 4),
+                                            Flexible(
+                                              child: Text(
+                                                ride['date'],
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: Color(0xFFa0a0a0),
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                const Icon(Icons.location_on,
-                                    size: 16, color: Colors.green),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    ride['pickup'],
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFFa0a0a0),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                const Icon(Icons.location_on,
-                                    size: 16, color: Colors.red),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    ride['dropoff'],
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFFa0a0a0),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.only(top: 8),
-                              decoration: const BoxDecoration(
-                                border: Border(
-                                  top: BorderSide(color: Color(0xFF333333)),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      'Chauffeur: ${ride['driver']}',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFFa0a0a0),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.location_on,
+                                          size: 16, color: Colors.green),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          ride['pickup'],
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Color(0xFFa0a0a0),
+                                          ),
+                                        ),
                                       ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                                    ],
                                   ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    ride['fare'],
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFFFFCC00),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.location_on,
+                                          size: 16, color: Colors.red),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          ride['dropoff'],
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Color(0xFFa0a0a0),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    decoration: const BoxDecoration(
+                                      border: Border(
+                                        top: BorderSide(color: Color(0xFF333333)),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            'Chauffeur: ${ride['driver']}',
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Color(0xFFa0a0a0),
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          ride['fare'],
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFFFFCC00),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ],
-              ),
+                          );
+                        }).toList(),
+                      ],
+                    ),
             ),
           ],
           
@@ -982,157 +1073,185 @@ class _ReportIncidentPageState extends State<ReportIncidentPage>
                 ),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Course sélectionnée',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFFa0a0a0),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _selectedRideId!,
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFFFFCC00),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+              child: _isLoadingRideDetails
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24.0),
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFFFCC00),
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        onPressed: () {
-                          setState(() {
-                            _selectedRideId = null;
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text(
-                              'Date',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFFa0a0a0),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _selectedRide?['date'] ?? 'N/A',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Chauffeur',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFFa0a0a0),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _selectedRide?['driver'] ?? 'Inconnu',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Tarif',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFFa0a0a0),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _selectedRide?['fare'] ?? 'N/A',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFFFFCC00),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Statut',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFFa0a0a0),
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Icon(Icons.check_circle,
-                                    size: 16, color: Colors.green),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Terminée',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.green,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Course sélectionnée',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFFa0a0a0),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _selectedRide?['displayId'] ?? _selectedRideId!,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFFFCC00),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: Colors.red),
+                              onPressed: () {
+                                setState(() {
+                                  _selectedRideId = null;
+                                  _selectedRideDetails = null;
+                                });
+                              },
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Date',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFFa0a0a0),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _selectedRide?['date'] ?? 'N/A',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Chauffeur',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFFa0a0a0),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _selectedRide?['driver'] ?? 'Inconnu',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Tarif',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFFa0a0a0),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _selectedRide?['fare'] ?? 'N/A',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFFFCC00),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Statut',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFFa0a0a0),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        (_selectedRide?['status']?.toString().toUpperCase() == 'COMPLETED')
+                                            ? Icons.check_circle
+                                            : ((_selectedRide?['status']?.toString().toUpperCase() == 'CANCELLED')
+                                                ? Icons.cancel
+                                                : Icons.info),
+                                        size: 16,
+                                        color: (_selectedRide?['status']?.toString().toUpperCase() == 'COMPLETED')
+                                            ? Colors.green
+                                            : ((_selectedRide?['status']?.toString().toUpperCase() == 'CANCELLED')
+                                                ? Colors.red
+                                                : Colors.orangeAccent),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          _selectedRide?['status']?.toString() ?? 'N/A',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: (_selectedRide?['status']?.toString().toUpperCase() == 'COMPLETED')
+                                                ? Colors.green
+                                                : ((_selectedRide?['status']?.toString().toUpperCase() == 'CANCELLED')
+                                                    ? Colors.red
+                                                    : Colors.orangeAccent),
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
             ),
           ],
         ],

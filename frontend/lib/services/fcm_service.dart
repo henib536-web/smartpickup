@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+import 'package:test_windows/main.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -39,6 +41,37 @@ class FCMService {
 
       if (message.notification != null) {
         print('Message also contained a notification: ${message.notification}');
+        
+        // Show visual SnackBar
+        scaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message.notification?.title ?? "Notification",
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(message.notification?.body ?? ""),
+              ],
+            ),
+            backgroundColor: const Color(0xFF1a1a1a),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: Color(0xFFFFCC00), width: 1.5),
+            ),
+            duration: const Duration(seconds: 4),
+            margin: const EdgeInsets.only(top: 40, left: 20, right: 20),
+            dismissDirection: DismissDirection.up,
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: const Color(0xFFFFCC00),
+              onPressed: () {},
+            ),
+          ),
+        );
       }
     });
 

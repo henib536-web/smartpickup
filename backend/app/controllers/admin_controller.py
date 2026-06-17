@@ -22,8 +22,9 @@ class AdminController:
             pending_drivers = db.query(func.count(User.user_id)).filter(User.role == UserRoleEnum.driver, User.is_active == False).scalar() or 0
             active_drivers  = db.query(func.count(User.user_id)).filter(User.role == UserRoleEnum.driver, User.is_active == True).scalar() or 0
 
-            # Revenue from ride_logs (amount actually paid)
-            total_revenue = db.query(func.coalesce(func.sum(RideLog.amount_paid_cash), 0)).scalar() or 0
+            # Revenue from completed rides (estimated_price in millimes → DT)
+            total_revenue_millimes = db.query(func.coalesce(func.sum(RideRequest.estimated_price), 0)).filter(RideRequest.status == RideStatusEnum.COMPLETED).scalar() or 0
+            total_revenue = float(total_revenue_millimes) / 1000.0
 
             return {
                 "total_rides":     total_rides,
@@ -87,17 +88,20 @@ class AdminController:
             rides_map = {str(r.day): int(r.cnt) for r in rides_rows}
             rides_per_day = [rides_map.get(str(d), 0) for d in days]
 
-            # ── 2. Revenu par jour (ride_logs.amount_paid_cash) ──────────────
+            # ── 2. Revenu par jour (estimated_price des courses COMPLETED, en millimes → DT) ──
             rev_rows = (
                 db.query(
-                    cast(RideLog.start_time, Date).label('day'),
-                    func.coalesce(func.sum(RideLog.amount_paid_cash), 0).label('rev')
+                    cast(RideRequest.requested_at, Date).label('day'),
+                    func.coalesce(func.sum(RideRequest.estimated_price), 0).label('rev')
                 )
-                .filter(cast(RideLog.start_time, Date) >= days[0])
-                .group_by(cast(RideLog.start_time, Date))
+                .filter(
+                    RideRequest.status == RideStatusEnum.COMPLETED,
+                    cast(RideRequest.requested_at, Date) >= days[0]
+                )
+                .group_by(cast(RideRequest.requested_at, Date))
                 .all()
             )
-            rev_map = {str(r.day): float(r.rev) for r in rev_rows}
+            rev_map = {str(r.day): round(float(r.rev) / 1000.0, 2) for r in rev_rows}
             revenue_per_day = [rev_map.get(str(d), 0.0) for d in days]
 
             # ── 3. Incidents par jour (incident_reports — no timestamp → total) ─

@@ -49,3 +49,7 @@ async def update_driver_status(user_id: int, payload: dict, db: Session = Depend
 @router.put("/location/{user_id}")
 async def update_driver_location(user_id: int, payload: dict, db: Session = Depends(get_db)):
     return DriverController.update_driver_location(db, user_id, payload.get("lat"), payload.get("lng"))
+
+@router.get("/stats/{user_id}")
+async def get_driver_stats(user_id: int, db: Session = Depends(get_db)):
+    return DriverController.get_driver_stats(db, user_id)

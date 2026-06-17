@@ -51,6 +51,34 @@ def migrate():
             conn.execute(text("ALTER TABLE ride_requests ADD COLUMN priority_price FLOAT DEFAULT 2.0"))
             conn.commit()
 
+        # Add distance_km to ride_requests if missing
+        if "distance_km" not in req_columns:
+            print("Adding distance_km to ride_requests...")
+            conn.execute(text("ALTER TABLE ride_requests ADD COLUMN distance_km DECIMAL(10, 2)"))
+            conn.commit()
+            print("Column distance_km added.")
+
+        # Add estimated_price to ride_requests if missing
+        if "estimated_price" not in req_columns:
+            print("Adding estimated_price to ride_requests...")
+            conn.execute(text("ALTER TABLE ride_requests ADD COLUMN estimated_price INTEGER"))
+            conn.commit()
+            print("Column estimated_price added.")
+
+        # Add distance_km to recurring_schedules if missing
+        if "distance_km" not in columns:
+            print("Adding distance_km to recurring_schedules...")
+            conn.execute(text("ALTER TABLE recurring_schedules ADD COLUMN distance_km DECIMAL(10, 2)"))
+            conn.commit()
+            print("Column distance_km added to recurring_schedules.")
+
+        # Add estimated_price to recurring_schedules if missing
+        if "estimated_price" not in columns:
+            print("Adding estimated_price to recurring_schedules...")
+            conn.execute(text("ALTER TABLE recurring_schedules ADD COLUMN estimated_price INTEGER"))
+            conn.commit()
+            print("Column estimated_price added to recurring_schedules.")
+
     print("Migration finished.")
 
 if __name__ == "__main__":

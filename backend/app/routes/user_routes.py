@@ -53,6 +53,12 @@ def update_fcm_token(user_id: int, payload: FcmTokenRequest, db: Session = Depen
     return UserController.update_fcm_token(db, user_id, payload.fcm_token)
 
 
+@router.delete("/fcm-token/{user_id}")
+def clear_fcm_token(user_id: int, db: Session = Depends(get_db)):
+    """Efface le token FCM lors de la déconnexion pour éviter les notifications croisées."""
+    return UserController.update_fcm_token(db, user_id, None)
+
+
 @router.post("/test-notification/{user_id}")
 def test_notification(user_id: int, db: Session = Depends(get_db)):
     return UserController.test_notification(db, user_id)
